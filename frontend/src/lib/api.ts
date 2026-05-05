@@ -1,8 +1,6 @@
 import type { TranscriptionResponse, TranscriptionTask, PolishResult, PolishStyle } from '../types';
 import { getAuthHeaders } from './auth';
-
-// Use relative URL for API - works with both localhost and LAN access
-const API_BASE = '/api';
+import { getApiBase } from './config';
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = {
@@ -28,7 +26,7 @@ export async function uploadAudio(file: File): Promise<TranscriptionResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetchWithAuth(`${API_BASE}/transcribe/upload`, {
+  const response = await fetchWithAuth(`${getApiBase()}/transcribe/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -42,7 +40,7 @@ export async function uploadAudio(file: File): Promise<TranscriptionResponse> {
 }
 
 export async function getTranscription(taskId: string): Promise<TranscriptionTask> {
-  const response = await fetchWithAuth(`${API_BASE}/transcribe/${taskId}`);
+  const response = await fetchWithAuth(`${getApiBase()}/transcribe/${taskId}`);
 
   if (!response.ok) {
     const error = await response.json();
@@ -53,7 +51,7 @@ export async function getTranscription(taskId: string): Promise<TranscriptionTas
 }
 
 export async function listTranscriptions(limit = 50, offset = 0): Promise<{ tasks: TranscriptionTask[]; total: number }> {
-  const response = await fetchWithAuth(`${API_BASE}/transcribe/?limit=${limit}&offset=${offset}`);
+  const response = await fetchWithAuth(`${getApiBase()}/transcribe/?limit=${limit}&offset=${offset}`);
 
   if (!response.ok) {
     throw new Error('Failed to list transcriptions');
@@ -63,7 +61,7 @@ export async function listTranscriptions(limit = 50, offset = 0): Promise<{ task
 }
 
 export async function deleteTranscription(taskId: string): Promise<void> {
-  const response = await fetchWithAuth(`${API_BASE}/transcribe/${taskId}`, {
+  const response = await fetchWithAuth(`${getApiBase()}/transcribe/${taskId}`, {
     method: 'DELETE',
   });
 
@@ -78,7 +76,7 @@ export async function polishText(
   style: PolishStyle = 'standard',
   includeSummary = false
 ): Promise<PolishResult> {
-  const response = await fetchWithAuth(`${API_BASE}/polish/`, {
+  const response = await fetchWithAuth(`${getApiBase()}/polish/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -99,7 +97,7 @@ export async function polishTask(
   style: PolishStyle = 'standard',
   includeSummary = false
 ): Promise<PolishResult> {
-  const response = await fetchWithAuth(`${API_BASE}/polish/task/${taskId}?style=${style}&include_summary=${includeSummary}`, {
+  const response = await fetchWithAuth(`${getApiBase()}/polish/task/${taskId}?style=${style}&include_summary=${includeSummary}`, {
     method: 'POST',
   });
 
@@ -121,7 +119,7 @@ export function polishStream(
   const controller = new AbortController();
   const authHeaders = getAuthHeaders();
 
-  fetch(`${API_BASE}/polish/stream`, {
+  fetch(`${getApiBase()}/polish/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

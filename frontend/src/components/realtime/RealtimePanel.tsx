@@ -5,6 +5,7 @@ import { MicControl } from './MicControl';
 import { TranscriptStream } from './TranscriptStream';
 import { PolishPanel } from '../polish/PolishPanel';
 import { getAuthToken } from '../../lib/auth';
+import { getWebSocketUrl } from '../../lib/config';
 
 interface TranscriptItem {
   id: string;
@@ -42,14 +43,11 @@ export function RealtimePanel() {
     });
   }, []);
 
-  // Build WebSocket URL dynamically to support both localhost and LAN access
+  // Build WebSocket URL using config (supports both dev and production)
   // Include auth token if available
   const buildWsUrl = () => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
     const token = getAuthToken();
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${protocol}//${host}/ws/realtime${tokenParam}`;
+    return getWebSocketUrl('/ws/realtime', token);
   };
 
   const wsUrl = buildWsUrl();
