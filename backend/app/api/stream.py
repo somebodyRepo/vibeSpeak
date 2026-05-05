@@ -85,8 +85,9 @@ async def realtime_websocket(
                 if result:
                     await websocket.send_json({
                         "type": "result",
-                        "text": result,
-                        "is_final": False,
+                        "text": result["text"],
+                        "is_final": result["is_final"],
+                        "current_segment": result.get("current_segment", ""),
                     })
 
             elif msg_type == "stop":

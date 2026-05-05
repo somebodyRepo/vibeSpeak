@@ -24,6 +24,10 @@ class ASRStream:
     cache: dict = field(default_factory=dict)
     vad_cache: dict = field(default_factory=dict)
     results: list = field(default_factory=list)
+    # 累积的完整文本
+    accumulated_text: str = ""
+    # 当前正在识别的片段（非 final）
+    current_segment_text: str = ""
 
 
 class ASRService:
@@ -145,10 +149,17 @@ class ASRService:
         self,
         stream: ASRStream,
         audio_bytes: bytes,
-    ) -> Optional[str]:
+    ) -> Optional[dict]:
         """
-        喂入音频帧，返回识别出的文本（如果有完整句子）
+        喂入音频帧，返回识别状态
         音频格式: 16kHz, 16bit, mono PCM
+
+        Returns:
+            {
+                "text": "累积的完整文本",
+                "is_final": False,  # 当前片段是否完成
+                "current_segment": "当前正在识别的片段"
+            }
         """
         await self.initialize()
 
@@ -156,16 +167,15 @@ class ASRService:
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float = audio_array.astype(np.float32) / 32768.0
 
-        # TODO: Implement true streaming with chunk-based inference
-        # For now, accumulate and process when enough data
+        # Accumulate audio data
         if not hasattr(stream, '_audio_buffer'):
             stream._audio_buffer = []
 
         stream._audio_buffer.append(audio_float)
 
-        # Process when buffer reaches threshold (~3 seconds)
+        # Process when buffer reaches threshold (~1 second for lower latency)
         buffer_duration = len(stream._audio_buffer) * len(audio_float) / 16000
-        if buffer_duration >= 3.0:
+        if buffer_duration >= 1.0:
             combined = np.concatenate(stream._audio_buffer)
             stream._audio_buffer = []
 
@@ -179,12 +189,24 @@ class ASRService:
             if result and result[0].get("text"):
                 text = rich_transcription_postprocess(result[0]["text"])
                 if text and text.strip():
-                    return text.strip()
+                    # 追加到累积文本
+                    if stream.accumulated_text:
+                        stream.accumulated_text += " " + text.strip()
+                    else:
+                        stream.accumulated_text = text.strip()
+
+                    stream.current_segment_text = text.strip()
+
+                    return {
+                        "text": stream.accumulated_text,
+                        "is_final": False,
+                        "current_segment": text.strip()
+                    }
 
         return None
 
     async def close_stream(self, session_id: str):
-        """关闭流式会话，返回剩余结果"""
+        """关闭流式会话，返回最终结果"""
         if session_id in self._streams:
             stream = self._streams[session_id]
 
@@ -192,12 +214,18 @@ class ASRService:
             if hasattr(stream, '_audio_buffer') and stream._audio_buffer:
                 combined = np.concatenate(stream._audio_buffer)
                 result = self.model.generate(input=combined, use_itn=True)
-                del self._streams[session_id]
 
                 if result and result[0].get("text"):
-                    return rich_transcription_postprocess(result[0]["text"])
+                    text = rich_transcription_postprocess(result[0]["text"])
+                    if text and text.strip():
+                        if stream.accumulated_text:
+                            stream.accumulated_text += " " + text.strip()
+                        else:
+                            stream.accumulated_text = text.strip()
 
+            final_text = stream.accumulated_text
             del self._streams[session_id]
+            return final_text
 
         return None
 

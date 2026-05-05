@@ -1,17 +1,19 @@
 import { useRef, useEffect } from 'react';
 
-interface TranscriptItem {
-  id: string;
-  text: string;
-  isFinal: boolean;
-  timestamp: Date;
-}
-
 interface TranscriptStreamProps {
-  transcripts: TranscriptItem[];
+  // 已确认的文本（之前的内容）
+  confirmedText: string;
+  // 当前正在识别的片段（实时更新）
+  currentSegment: string;
+  // 最终完整文本
+  finalText: string;
 }
 
-export function TranscriptStream({ transcripts }: TranscriptStreamProps) {
+export function TranscriptStream({
+  confirmedText,
+  currentSegment,
+  finalText,
+}: TranscriptStreamProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom
@@ -19,14 +21,17 @@ export function TranscriptStream({ transcripts }: TranscriptStreamProps) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcripts]);
+  }, [finalText, currentSegment]);
+
+  // 计算显示内容
+  const hasContent = finalText || currentSegment || confirmedText;
 
   return (
     <div
       ref={scrollRef}
       className="h-96 overflow-y-auto rounded-xl border border-gray-800 bg-gray-900/50 p-4"
     >
-      {transcripts.length === 0 ? (
+      {!hasContent ? (
         <div className="flex h-full flex-col items-center justify-center text-gray-500">
           <svg
             className="mb-3 h-12 w-12"
@@ -46,38 +51,41 @@ export function TranscriptStream({ transcripts }: TranscriptStreamProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          {transcripts.map((item, index) => (
-            <div
-              key={item.id}
-              className={`rounded-lg p-3 transition-all ${
-                item.isFinal
-                  ? 'bg-gray-800/50'
-                  : 'bg-purple-900/20 border border-purple-500/30'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs text-gray-300">
-                  {index + 1}
-                </span>
-                <div className="flex-1">
-                  <p
-                    className={`text-sm leading-relaxed ${
-                      item.isFinal ? 'text-gray-200' : 'text-purple-200'
-                    }`}
-                  >
-                    {item.text}
-                    {!item.isFinal && <span className="cursor-blink"></span>}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {item.timestamp.toLocaleTimeString()}
-                    {item.isFinal && (
-                      <span className="ml-2 text-green-500">已完成</span>
-                    )}
-                  </p>
-                </div>
-              </div>
+          {/* 已确认的文本 */}
+          {confirmedText && !finalText && (
+            <div className="rounded-lg bg-gray-800/50 p-3">
+              <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">
+                {confirmedText}
+              </p>
             </div>
-          ))}
+          )}
+
+          {/* 当前正在识别的片段 */}
+          {currentSegment && !finalText && (
+            <div className="rounded-lg bg-purple-900/20 border border-purple-500/30 p-3">
+              <p className="text-sm leading-relaxed text-purple-200">
+                {currentSegment}
+                <span className="inline-block w-0.5 h-4 ml-0.5 bg-purple-400 animate-pulse"></span>
+              </p>
+            </div>
+          )}
+
+          {/* 最终完整文本 */}
+          {finalText && (
+            <div className="rounded-lg bg-gray-800/50 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="flex items-center justify-center rounded-full bg-green-900/50 px-2 py-0.5 text-xs text-green-400">
+                  <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  转写完成
+                </span>
+              </div>
+              <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">
+                {finalText}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
