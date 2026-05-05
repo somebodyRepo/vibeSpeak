@@ -1,0 +1,51 @@
+# Caddy configuration example for VibeSpeak Frontend
+# 1. Copy this file to /etc/caddy/Caddyfile (system directory, NOT in git)
+# 2. Replace placeholders with your actual values
+# 3. Reload Caddy: sudo systemctl reload caddy
+#
+# Security: This file contains sensitive information. Do NOT commit to git!
+
+YOUR_DOMAIN {
+    # Enable HTTPS automatically (Let's Encrypt)
+    tls internal
+
+    # Enable compression
+    encode gzip zstd
+
+    # Handle API requests - inject auth token before forwarding to backend
+    handle /api/* {
+        # 注意：将 YOUR_AUTH_TOKEN 替换为实际的 Token
+        header_up Authorization "Bearer YOUR_AUTH_TOKEN"
+        reverse_proxy http://YOUR_BACKEND_HOST:8000
+    }
+
+    # Handle WebSocket requests - inject auth token
+    handle /ws/* {
+        header_up Authorization "Bearer YOUR_AUTH_TOKEN"
+        reverse_proxy http://YOUR_BACKEND_HOST:8000 {
+            header_up Upgrade {>Upgrade}
+            header_up Connection {>Connection}
+        }
+    }
+
+    # Handle all other requests -> Frontend
+    handle {
+        reverse_proxy localhost:5173
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/YOUR_DOMAIN-access.log {
+            roll_size 10MB
+            roll_keep 5
+        }
+    }
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=VibeSpeak Frontend Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/app/vibeSpeak/frontend
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/npm run preview
+Restart=always
+RestartSec=5
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/ubuntu/app/vibeSpeak/frontend
+
+[Install]
+WantedBy=multi-user.target

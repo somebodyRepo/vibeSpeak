@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy this file to config.json and fill in your values. config.json is gitignored.",
+  "backend": {
+    "_comment": "Backend server host. Leave empty for Caddy proxy mode.",
+    "host": "",
+    "apiPath": "/api",
+    "wsPath": "/ws"
+  },
+  "auth": {
+    "_comment": "Token is injected by Caddy in production. Not needed for Caddy proxy mode."
+  },
+  "app": {
+    "name": "vibeSpeak",
+    "version": "1.0.0"
+  }
+}

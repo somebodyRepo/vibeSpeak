@@ -27,11 +27,18 @@ async def realtime_websocket(
     - 客户端发送: {"type": "stop"} 结束会话
     - 服务端返回: {"type": "complete", "session_id": "xxx"}
 
-    认证：通过 query parameter ?token=xxx 传递
+    认证：通过 query parameter ?token=xxx 或 Authorization header 传递
     """
     # 验证 token（如果启用了认证）
     if settings.auth_enabled:
-        if not token or not secrets.compare_digest(token, settings.auth_token):
+        # 优先从 query param 获取，其次从 header 获取
+        auth_token = token
+        if not auth_token:
+            auth_header = websocket.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                auth_token = auth_header[7:]  # 去掉 "Bearer " 前缀
+
+        if not auth_token or not secrets.compare_digest(auth_token, settings.auth_token):
             await websocket.accept()
             await websocket.send_json({
                 "type": "error",
