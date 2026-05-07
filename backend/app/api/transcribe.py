@@ -188,7 +188,7 @@ async def get_transcription(
             pass
 
     return TranscriptionResult(
-        task_id=task.id,
+        id=task.id,
         filename=task.filename,
         duration_s=task.duration_s,
         status=task.status,

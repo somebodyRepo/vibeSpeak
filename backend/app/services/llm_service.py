@@ -1,8 +1,6 @@
 import asyncio
 from typing import AsyncIterator, Literal, Optional
 
-import httpx
-from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
@@ -53,7 +51,7 @@ CONCISE_STYLE_PROMPT = """你是精简表达专家。请将以下文本精简为
 
 
 class LLMService:
-    """多模型适配器 LLM 服务"""
+    """OpenAI 兼容 API LLM 服务"""
 
     _instance = None
     _lock = asyncio.Lock()
@@ -77,26 +75,14 @@ class LLMService:
             if self._initialized:
                 return
 
-            self.provider = settings.llm_provider
-
-            if self.provider == "anthropic" and settings.anthropic_api_key:
-                self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-                self.model = settings.anthropic_model
-            elif self.provider == "openai" and settings.openai_api_key:
-                self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-                self.model = settings.openai_model
-            elif self.provider == "deepseek" and settings.deepseek_api_key:
+            if settings.llm_base_url and settings.llm_api_key:
                 self.client = AsyncOpenAI(
-                    api_key=settings.deepseek_api_key,
-                    base_url="https://api.deepseek.com/v1",
+                    api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url,
+                    timeout=60.0,
+                    max_retries=2,
                 )
-                self.model = settings.deepseek_model
-            elif self.provider == "zhipu" and settings.zhipu_api_key:
-                self.client = AsyncOpenAI(
-                    api_key=settings.zhipu_api_key,
-                    base_url="https://open.bigmodel.cn/api/paas/v4/",
-                )
-                self.model = settings.zhipu_model
+                self.model = settings.llm_model
             else:
                 self.client = None
                 self.model = None
@@ -129,24 +115,15 @@ class LLMService:
         system_prompt = self._get_system_prompt(style)
 
         try:
-            if self.provider == "anthropic":
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": f"原文：\n{text}"}],
-                )
-                polished = response.content[0].text
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"原文：\n{text}"},
-                    ],
-                    temperature=0.3,
-                )
-                polished = response.choices[0].message.content
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"原文：\n{text}"},
+                ],
+                temperature=0.3,
+            )
+            polished = response.choices[0].message.content
 
             summary = None
             if include_summary:
@@ -173,28 +150,18 @@ class LLMService:
         system_prompt = self._get_system_prompt(style)
 
         try:
-            if self.provider == "anthropic":
-                async with self.client.messages.stream(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": f"原文：\n{text}"}],
-                ) as stream:
-                    async for text_delta in stream.text_stream:
-                        yield text_delta
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"原文：\n{text}"},
-                    ],
-                    temperature=0.3,
-                    stream=True,
-                )
-                async for chunk in response:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"原文：\n{text}"},
+                ],
+                temperature=0.3,
+                stream=True,
+            )
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
 
         except Exception as e:
             print(f"LLM stream error: {e}")
@@ -208,24 +175,15 @@ class LLMService:
             return ""
 
         try:
-            if self.provider == "anthropic":
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=2048,
-                    system=SUMMARY_SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": text}],
-                )
-                return response.content[0].text
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                        {"role": "user", "content": text},
-                    ],
-                    temperature=0.3,
-                )
-                return response.choices[0].message.content
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content
 
         except Exception as e:
             print(f"Summary error: {e}")

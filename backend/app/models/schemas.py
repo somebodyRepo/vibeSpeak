@@ -41,7 +41,7 @@ class TranscriptionResponse(BaseModel):
 
 
 class TranscriptionResult(BaseModel):
-    task_id: str
+    id: str
     filename: str
     duration_s: Optional[float]
     status: str

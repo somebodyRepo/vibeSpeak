@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,16 +30,10 @@ class Settings(BaseSettings):
     asr_device: str = "auto"  # auto, cpu, cuda, mps
     vad_model_name: str = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
 
-    # LLM Provider
-    llm_provider: Literal["anthropic", "openai", "deepseek", "zhipu"] = "anthropic"
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-sonnet-20241022"
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
-    deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-chat"
-    zhipu_api_key: str = ""
-    zhipu_model: str = "glm-4"
+    # LLM (OpenAI 兼容 API)
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o"
 
     # Audio
     sample_rate: int = 16000
