@@ -1,16 +1,19 @@
 interface NavBarProps {
-  activeTab: 'realtime' | 'batch';
-  onTabChange: (tab: 'realtime' | 'batch') => void;
+  activeTab: 'projects' | 'record';
+  onTabChange: (tab: 'projects' | 'record') => void;
 }
 
 export function NavBar({ activeTab, onTabChange }: NavBarProps) {
   return (
-    <nav className="border-b border-gray-800 bg-[#0f0f0f]">
-      <div className="container mx-auto max-w-6xl px-4">
-        <div className="flex h-16 items-center justify-between">
+    <nav className="sticky top-4 mx-4 rounded-2xl bg-white/80 backdrop-blur-sm
+                    shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+      <div className="px-6">
+        <div className="flex h-14 items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-pink-500">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl
+                            bg-gradient-to-br from-blue-500 to-purple-500
+                            shadow-[0_2px_8px_rgba(59,130,246,0.3)]">
               <svg
                 className="h-5 w-5 text-white"
                 fill="none"
@@ -25,19 +28,20 @@ export function NavBar({ activeTab, onTabChange }: NavBarProps) {
                 />
               </svg>
             </div>
-            <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+            <span className="text-xl font-heading font-semibold bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">
               vibeSpeak
             </span>
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex gap-1 rounded-lg bg-gray-900 p-1">
+          <div className="flex gap-1 p-1 rounded-xl bg-gray-100
+                          shadow-[inset_2px_2px_4px_rgba(0,0,0,0.06)]">
             <button
-              onClick={() => onTabChange('realtime')}
-              className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'realtime'
-                  ? 'bg-gray-800 text-white'
-                  : 'text-gray-400 hover:text-white'
+              onClick={() => onTabChange('projects')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium font-body transition-all duration-200 cursor-pointer ${
+                activeTab === 'projects'
+                  ? 'bg-white text-blue-600 shadow-[2px_2px_6px_rgba(0,0,0,0.06),-2px_-2px_6px_rgba(255,255,255,0.8)]'
+                  : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -45,17 +49,17 @@ export function NavBar({ activeTab, onTabChange }: NavBarProps) {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
                 />
               </svg>
-              实时转写
+              项目管理
             </button>
             <button
-              onClick={() => onTabChange('batch')}
-              className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'batch'
-                  ? 'bg-gray-800 text-white'
-                  : 'text-gray-400 hover:text-white'
+              onClick={() => onTabChange('record')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium font-body transition-all duration-200 cursor-pointer ${
+                activeTab === 'record'
+                  ? 'bg-white text-orange-600 shadow-[2px_2px_6px_rgba(0,0,0,0.06),-2px_-2px_6px_rgba(255,255,255,0.8)]'
+                  : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,15 +67,19 @@ export function NavBar({ activeTab, onTabChange }: NavBarProps) {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
                 />
               </svg>
-              批量转写
+              实时录音
             </button>
           </div>
 
           {/* Settings */}
-          <button className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-800 hover:text-white">
+          <button className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400
+                             bg-gray-100
+                             shadow-[inset_2px_2px_4px_rgba(0,0,0,0.04)]
+                             hover:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.06)]
+                             transition-all duration-200 cursor-pointer">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"

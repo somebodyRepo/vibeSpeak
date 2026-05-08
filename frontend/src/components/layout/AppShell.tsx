@@ -1,19 +1,209 @@
 import { useState } from 'react';
 import { NavBar } from './NavBar';
-import { RealtimePanel } from '../realtime/RealtimePanel';
-import { BatchPanel } from '../batch/BatchPanel';
+import { ProjectList } from '../projects/ProjectList';
+import { ProjectEditor } from '../projects/ProjectEditor';
+import { OutlineEditor } from '../projects/OutlineEditor';
+import { SessionList } from '../sessions/SessionList';
+import { SessionViewer } from '../sessions/SessionViewer';
+import { SessionImporter } from '../sessions/SessionImporter';
+import type { Project, InterviewSession, Outline } from '../../types';
 
-type Tab = 'realtime' | 'batch';
+type View =
+  | 'project-list'
+  | 'project-new'
+  | 'project-edit'
+  | 'outline-new'
+  | 'project-detail'
+  | 'session-detail';
 
 export function AppShell() {
-  const [activeTab, setActiveTab] = useState<Tab>('realtime');
+  const [activeTab, setActiveTab] = useState<'projects' | 'record'>('projects');
+  const [view, setView] = useState<View>('project-list');
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [showImporter, setShowImporter] = useState(false);
+
+  const handleSelectProject = (project: Project) => {
+    setSelectedProject(project);
+    setView('project-detail');
+  };
+
+  const handleSelectSession = (session: InterviewSession) => {
+    setSelectedSession(session.id);
+    setView('session-detail');
+  };
+
+  const handleNewProject = () => {
+    setSelectedProject(null);
+    setView('project-new');
+  };
+
+  const handleEditProject = () => {
+    if (selectedProject) {
+      setView('project-edit');
+    }
+  };
+
+  const handleSaveProject = (project: Project) => {
+    setSelectedProject(project);
+    setView('project-detail');
+  };
+
+  const handleSaveOutline = (outline: Outline) => {
+    // 刷新项目以关联新提纲
+    setView('project-new');
+  };
+
+  const handleImportAudio = () => {
+    setShowImporter(true);
+  };
+
+  const handleBackToProjects = () => {
+    setSelectedProject(null);
+    setView('project-list');
+  };
+
+  const handleBackToProject = () => {
+    setSelectedSession(null);
+    setView('project-detail');
+  };
+
+  const handleImportComplete = () => {
+    // 刷新会话列表
+  };
 
   return (
-    <div className="min-h-screen bg-[#0f0f0f] text-gray-200">
+    <div className="min-h-screen bg-[#F8FAFC] font-body">
       <NavBar activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <main className="container mx-auto max-w-6xl px-4 py-6">
-        {activeTab === 'realtime' ? <RealtimePanel /> : <BatchPanel />}
+      <main className="container mx-auto max-w-6xl px-4 md:px-6 lg:px-8 py-6">
+        {activeTab === 'projects' && (
+          <>
+            {view === 'project-list' && (
+              <ProjectList
+                onSelect={handleSelectProject}
+                onNewProject={handleNewProject}
+              />
+            )}
+
+            {view === 'project-new' && (
+              <div className="space-y-4">
+                <ProjectEditor
+                  onSave={handleSaveProject}
+                  onCancel={handleBackToProjects}
+                />
+                <button
+                  onClick={() => setView('outline-new')}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium text-purple-600
+                             bg-purple-50 hover:bg-purple-100 border-2 border-dashed border-purple-200
+                             cursor-pointer"
+                >
+                  或创建新提纲
+                </button>
+              </div>
+            )}
+
+            {view === 'project-edit' && selectedProject && (
+              <ProjectEditor
+                project={selectedProject}
+                onSave={handleSaveProject}
+                onCancel={handleBackToProject}
+              />
+            )}
+
+            {view === 'outline-new' && (
+              <OutlineEditor
+                onSave={handleSaveOutline}
+                onCancel={() => setView('project-new')}
+              />
+            )}
+
+            {view === 'project-detail' && selectedProject && (
+              <div className="space-y-6">
+                {/* Project Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleBackToProjects}
+                      className="p-2 rounded-lg text-slate-500 hover:bg-gray-100 cursor-pointer"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <div>
+                      <h1 className="text-xl font-heading font-semibold text-slate-800">
+                        {selectedProject.name}
+                      </h1>
+                      <p className="text-sm text-slate-500">
+                        {selectedProject.description || '暂无描述'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleEditProject}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
+                               bg-gray-100 hover:bg-gray-200 cursor-pointer"
+                  >
+                    编辑项目
+                  </button>
+                </div>
+
+                {/* Outline Preview */}
+                {selectedProject.outline && (
+                  <div className="p-4 rounded-2xl bg-gray-100
+                                  shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04)]">
+                    <h3 className="font-medium text-slate-700 mb-2 font-heading">
+                      关联提纲: {selectedProject.outline.name}
+                    </h3>
+                    <div className="text-sm text-slate-600 space-y-2">
+                      {selectedProject.outline.content.sections.map(section => (
+                        <div key={section.id}>
+                          <span className="font-medium">{section.title}</span>
+                          <ul className="ml-4 text-slate-500">
+                            {section.questions.map((q, i) => (
+                              <li key={i}>• {q}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Session List */}
+                <SessionList
+                  project={selectedProject}
+                  onSelect={handleSelectSession}
+                  onImport={handleImportAudio}
+                />
+              </div>
+            )}
+
+            {view === 'session-detail' && selectedSession && (
+              <SessionViewer
+                sessionId={selectedSession}
+                onBack={handleBackToProject}
+              />
+            )}
+
+            {/* Import Modal */}
+            {showImporter && selectedProject && (
+              <SessionImporter
+                projectId={selectedProject.id}
+                onComplete={handleImportComplete}
+                onClose={() => setShowImporter(false)}
+              />
+            )}
+          </>
+        )}
+
+        {activeTab === 'record' && (
+          <div className="flex flex-col items-center justify-center h-64 rounded-2xl bg-gray-100 text-slate-500">
+            <p className="text-lg font-medium">录音功能开发中...</p>
+            <p className="text-sm mt-2">请先使用 "导入音频" 功能上传已有录音文件</p>
+          </div>
+        )}
       </main>
     </div>
   );

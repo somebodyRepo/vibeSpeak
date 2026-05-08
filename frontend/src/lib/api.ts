@@ -1,4 +1,4 @@
-import type { TranscriptionResponse, TranscriptionTask, PolishResult, PolishStyle } from '../types';
+import type { TranscriptionResponse, TranscriptionTask, PolishResult, PolishStyle, Project, ProjectCreate, ProjectUpdate, Outline, OutlineCreate, OutlineImport, InterviewSession, SessionUpdate } from '../types';
 import { getAuthHeaders } from './auth';
 import { getApiBase } from './config';
 
@@ -171,4 +171,252 @@ export function polishStream(
     });
 
   return () => controller.abort();
+}
+
+// ===== 新增: 项目管理 API =====
+
+// 项目
+export async function createProject(data: ProjectCreate): Promise<Project> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to create project');
+  }
+  return response.json();
+}
+
+export async function listProjects(limit = 50, offset = 0): Promise<{ projects: Project[]; total: number }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/?limit=${limit}&offset=${offset}`);
+  if (!response.ok) throw new Error('Failed to list projects');
+  return response.json();
+}
+
+export async function getProject(projectId: string): Promise<Project> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get project');
+  }
+  return response.json();
+}
+
+export async function updateProject(projectId: string, data: ProjectUpdate): Promise<Project> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update project');
+  }
+  return response.json();
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to delete project');
+  }
+}
+
+export async function exportProject(projectId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/export`);
+  if (!response.ok) throw new Error('Failed to export project');
+  return response.blob();
+}
+
+// 提纲
+export async function createOutline(data: OutlineCreate): Promise<Outline> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to create outline');
+  }
+  return response.json();
+}
+
+export async function importOutline(data: OutlineImport): Promise<Outline> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to import outline');
+  }
+  return response.json();
+}
+
+export async function listOutlines(limit = 50, offset = 0): Promise<{ outlines: Outline[]; total: number }> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/?limit=${limit}&offset=${offset}`);
+  if (!response.ok) throw new Error('Failed to list outlines');
+  return response.json();
+}
+
+export async function getOutline(outlineId: string): Promise<Outline> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/${outlineId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get outline');
+  }
+  return response.json();
+}
+
+export async function updateOutline(outlineId: string, data: Partial<OutlineCreate>): Promise<Outline> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/${outlineId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update outline');
+  }
+  return response.json();
+}
+
+export async function deleteOutline(outlineId: string): Promise<void> {
+  const response = await fetchWithAuth(`${getApiBase()}/outlines/${outlineId}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to delete outline');
+  }
+}
+
+// 会话
+export async function createSession(projectId: string, file: File): Promise<InterviewSession> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/?project_id=${projectId}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to create session');
+  }
+  return response.json();
+}
+
+export async function batchImportSessions(projectId: string, files: File[]): Promise<{ session_ids: string[] }> {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/batch-import?project_id=${projectId}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to batch import');
+  }
+  return response.json();
+}
+
+export async function listSessions(projectId: string, limit = 50, offset = 0): Promise<{ sessions: InterviewSession[]; total: number }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/?project_id=${projectId}&limit=${limit}&offset=${offset}`);
+  if (!response.ok) throw new Error('Failed to list sessions');
+  return response.json();
+}
+
+export async function getSession(sessionId: string): Promise<InterviewSession> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get session');
+  }
+  return response.json();
+}
+
+export async function updateSession(sessionId: string, data: SessionUpdate): Promise<InterviewSession> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update session');
+  }
+  return response.json();
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to delete session');
+  }
+}
+
+// 处理流程
+export async function transcribeSession(sessionId: string): Promise<{ success: boolean; message: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/transcribe`, { method: 'POST' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to start transcription');
+  }
+  return response.json();
+}
+
+export async function extractSessionInfo(sessionId: string): Promise<{ success: boolean; extracted_info: Record<string, unknown> }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/extract`, { method: 'POST' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to extract info');
+  }
+  return response.json();
+}
+
+export async function validateSession(sessionId: string): Promise<{ success: boolean; missing_info: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/validate`, { method: 'POST' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to validate');
+  }
+  return response.json();
+}
+
+export async function finalizeSession(sessionId: string): Promise<{ success: boolean; final_content: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/finalize`, { method: 'POST' });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to finalize');
+  }
+  return response.json();
+}
+
+// 导出
+export async function exportSessionAudio(sessionId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/export/audio`);
+  if (!response.ok) throw new Error('Failed to export audio');
+  return response.blob();
+}
+
+export async function exportSessionTranscript(sessionId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/export/transcript`);
+  if (!response.ok) throw new Error('Failed to export transcript');
+  return response.blob();
+}
+
+export async function exportSessionExtracted(sessionId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/export/extracted`);
+  if (!response.ok) throw new Error('Failed to export extracted');
+  return response.blob();
+}
+
+export async function exportSessionFinal(sessionId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/export/final`);
+  if (!response.ok) throw new Error('Failed to export final');
+  return response.blob();
 }

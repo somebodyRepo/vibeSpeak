@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import polish, stream, transcribe
+from app.api import polish, stream, transcribe, outlines, projects, sessions
 from app.core.auth import AuthMiddleware
 from app.core.config import get_settings
 from app.models.database import init_db
@@ -62,6 +62,9 @@ app.add_middleware(
 app.include_router(transcribe.router, prefix=settings.api_prefix)
 app.include_router(polish.router, prefix=settings.api_prefix)
 app.include_router(stream.router)
+app.include_router(outlines.router, prefix=settings.api_prefix)
+app.include_router(projects.router, prefix=settings.api_prefix)
+app.include_router(sessions.router, prefix=settings.api_prefix)
 
 
 @app.get("/api/health")
