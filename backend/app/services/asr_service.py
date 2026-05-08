@@ -1,12 +1,7 @@
 import asyncio
-import base64
-import io
-from collections import defaultdict
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import Optional
 
-import numpy as np
 import torch
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -15,19 +10,6 @@ from app.core.config import get_settings
 from app.models.schemas import TranscriptionSegment
 
 settings = get_settings()
-
-
-@dataclass
-class ASRStream:
-    """流式 ASR 会话状态"""
-    session_id: str
-    cache: dict = field(default_factory=dict)
-    vad_cache: dict = field(default_factory=dict)
-    results: list = field(default_factory=list)
-    # 累积的完整文本
-    accumulated_text: str = ""
-    # 当前正在识别的片段（非 final）
-    current_segment_text: str = ""
 
 
 class ASRService:
@@ -49,7 +31,6 @@ class ASRService:
         self.model = None
         self.vad_model = None
         self._initialized = False
-        self._streams: dict[str, ASRStream] = {}
 
     async def initialize(self):
         """懒加载模型"""
@@ -137,97 +118,6 @@ class ASRService:
 
         full_text = "\n".join(full_text_parts)
         return segments, full_text
-
-    async def create_stream(self, session_id: str) -> ASRStream:
-        """创建新的流式识别会话"""
-        await self.initialize()
-        stream = ASRStream(session_id=session_id)
-        self._streams[session_id] = stream
-        return stream
-
-    async def stream_audio_chunk(
-        self,
-        stream: ASRStream,
-        audio_bytes: bytes,
-    ) -> Optional[dict]:
-        """
-        喂入音频帧，返回识别状态
-        音频格式: 16kHz, 16bit, mono PCM
-
-        Returns:
-            {
-                "text": "累积的完整文本",
-                "is_final": False,  # 当前片段是否完成
-                "current_segment": "当前正在识别的片段"
-            }
-        """
-        await self.initialize()
-
-        # Convert bytes to numpy array
-        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-        audio_float = audio_array.astype(np.float32) / 32768.0
-
-        # Accumulate audio data
-        if not hasattr(stream, '_audio_buffer'):
-            stream._audio_buffer = []
-
-        stream._audio_buffer.append(audio_float)
-
-        # Process when buffer reaches threshold (~1 second for lower latency)
-        buffer_duration = len(stream._audio_buffer) * len(audio_float) / 16000
-        if buffer_duration >= 1.0:
-            combined = np.concatenate(stream._audio_buffer)
-            stream._audio_buffer = []
-
-            # Run inference on chunk
-            result = self.model.generate(
-                input=combined,
-                batch_size_s=300,
-                use_itn=True,
-            )
-
-            if result and result[0].get("text"):
-                text = rich_transcription_postprocess(result[0]["text"])
-                if text and text.strip():
-                    # 追加到累积文本
-                    if stream.accumulated_text:
-                        stream.accumulated_text += " " + text.strip()
-                    else:
-                        stream.accumulated_text = text.strip()
-
-                    stream.current_segment_text = text.strip()
-
-                    return {
-                        "text": stream.accumulated_text,
-                        "is_final": False,
-                        "current_segment": text.strip()
-                    }
-
-        return None
-
-    async def close_stream(self, session_id: str):
-        """关闭流式会话，返回最终结果"""
-        if session_id in self._streams:
-            stream = self._streams[session_id]
-
-            # Process remaining buffer
-            if hasattr(stream, '_audio_buffer') and stream._audio_buffer:
-                combined = np.concatenate(stream._audio_buffer)
-                result = self.model.generate(input=combined, use_itn=True)
-
-                if result and result[0].get("text"):
-                    text = rich_transcription_postprocess(result[0]["text"])
-                    if text and text.strip():
-                        if stream.accumulated_text:
-                            stream.accumulated_text += " " + text.strip()
-                        else:
-                            stream.accumulated_text = text.strip()
-
-            final_text = stream.accumulated_text
-            del self._streams[session_id]
-            return final_text
-
-        return None
 
 
 # Global instance

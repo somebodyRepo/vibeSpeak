@@ -1,8 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { useAudioCapture } from '../../hooks/useAudioCapture';
-import { useWebSocket } from '../../hooks/useWebSocket';
-import { getWsBase } from '../../lib/config';
+import { useState } from 'react';
+import { useMediaRecorder } from '../../hooks/useMediaRecorder';
 import { getAuthHeaders } from '../../lib/auth';
+import { getApiBase } from '../../lib/config';
 import type { Project, OutlineSection } from '../../types';
 
 interface SessionRecorderProps {
@@ -12,95 +11,97 @@ interface SessionRecorderProps {
 }
 
 export function SessionRecorder({ project, onComplete, onCancel }: SessionRecorderProps) {
-  const [transcript, setTranscript] = useState('');
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [completedSections, setCompletedSections] = useState<Set<string>>(new Set());
-  const [isPaused, setIsPaused] = useState(false);
-  const transcriptRef = useRef('');
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const outline = project.outline;
 
-  // WebSocket 连接
-  const wsUrl = outline
-    ? `${getWsBase()}/ws/realtime?token=${getAuthHeaders().Authorization?.replace('Bearer ', '') || ''}`
-    : '';
+  // 录音完成后的处理
+  const handleRecordingStop = async (blob: Blob, duration: number) => {
+    if (duration < 1) {
+      alert('录音时间太短，请至少录制 1 秒');
+      return;
+    }
 
-  const { isConnected, isConnecting, connect, disconnect, send } = useWebSocket(wsUrl, {
-    onMessage: (data) => {
-      if (data.type === 'ready') {
-        setSessionId(data.session_id as string);
-      } else if (data.type === 'result') {
-        const text = data.text as string;
-        const isFinal = data.is_final as boolean;
-        if (isFinal) {
-          transcriptRef.current = transcriptRef.current + text;
-          setTranscript(transcriptRef.current);
-        } else {
-          setTranscript(transcriptRef.current + text);
-        }
-      } else if (data.type === 'complete') {
-        // 录音完成
-        if (sessionId) {
-          onComplete(sessionId);
-        }
-      }
-    },
-  });
+    setUploading(true);
+    setUploadProgress(0);
 
-  // 音频捕获
-  const { isRecording, formattedDuration, startRecording, stopRecording } = useAudioCapture({
-    onAudioData: (data) => {
-      if (isConnected && !isPaused) {
-        // Convert Int16Array to base64
-        const uint8 = new Uint8Array(data.buffer);
-        let binary = '';
-        for (let i = 0; i < uint8.length; i++) {
-          binary += String.fromCharCode(uint8[i]);
+    try {
+      // 创建文件名
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+      const ext = blob.type.includes('webm') ? 'webm' : 'm4a';
+      const filename = `${project.name}_${timestamp}.${ext}`;
+
+      // 创建 File 对象
+      const file = new File([blob], filename, { type: blob.type });
+
+      // 使用 XMLHttpRequest 上传以获取进度
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+
+      // 获取认证 token
+      const authHeaders = getAuthHeaders();
+
+      await new Promise((resolve, reject) => {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(progress);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(xhr.response);
+          } else {
+            reject(new Error(`Upload failed: ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Upload failed'));
+
+        xhr.open('POST', `${getApiBase()}/sessions/?project_id=${project.id}`);
+        if (authHeaders.Authorization) {
+          xhr.setRequestHeader('Authorization', authHeaders.Authorization);
         }
-        const base64 = btoa(binary);
-        send({ type: 'audio', data: base64 });
-      }
-    },
+        xhr.send(formData);
+      });
+
+      // 解析响应获取 session ID
+      const response = JSON.parse(xhr.responseText);
+      onComplete(response.id);
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('上传失败: ' + (error instanceof Error ? error.message : '未知错误'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // 使用 MediaRecorder hook
+  const {
+    isRecording,
+    isPaused,
+    formattedDuration,
+    startRecording,
+    stopRecording,
+    pauseRecording,
+    resumeRecording,
+  } = useMediaRecorder({
+    onStop: handleRecordingStop,
     onError: (error) => {
       alert('录音错误: ' + error.message);
     },
+    onAudioLevel: (level) => {
+      setAudioLevel(level);
+    },
   });
-
-  // 开始录音
-  const handleStartRecording = useCallback(async () => {
-    if (!outline) {
-      alert('请先为项目关联提纲');
-      return;
-    }
-    await connect();
-  }, [outline, connect]);
-
-  // WebSocket 连接后发送 init
-  useEffect(() => {
-    if (isConnected && !sessionId) {
-      send({ type: 'init' });
-    }
-  }, [isConnected, sessionId, send]);
-
-  // 开始录音（WebSocket 已连接）
-  useEffect(() => {
-    if (isConnected && sessionId && !isRecording) {
-      startRecording();
-    }
-  }, [isConnected, sessionId, isRecording, startRecording]);
-
-  // 暂停/继续
-  const handlePause = () => {
-    setIsPaused(!isPaused);
-  };
-
-  // 停止录音
-  const handleStop = () => {
-    stopRecording();
-    send({ type: 'stop' });
-    disconnect();
-  };
 
   // 标记板块完成
   const markSectionComplete = (sectionId: string) => {
@@ -142,7 +143,9 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
         <div className="flex items-center gap-3">
           <button
             onClick={onCancel}
-            className="p-2 rounded-lg text-slate-500 hover:bg-gray-100 cursor-pointer"
+            disabled={isRecording || uploading}
+            className="p-2 rounded-lg text-slate-500 hover:bg-gray-100
+                       disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -227,11 +230,21 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
           <span className="text-4xl font-mono text-slate-700">{formattedDuration}</span>
         </div>
 
+        {/* Audio Level Indicator */}
+        {isRecording && (
+          <div className="mb-4 w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-green-400 to-green-500 transition-all duration-100"
+              style={{ width: `${Math.min(audioLevel * 100 * 3, 100)}%` }}
+            />
+          </div>
+        )}
+
         {/* Main Recording Button */}
         {!isRecording ? (
           <button
-            onClick={handleStartRecording}
-            disabled={isConnecting}
+            onClick={startRecording}
+            disabled={uploading}
             className="w-24 h-24 rounded-full flex items-center justify-center
                        bg-gradient-to-br from-orange-400 to-orange-500
                        shadow-[8px_8px_20px_rgba(251,146,60,0.4),-8px_-8px_20px_rgba(255,255,255,0.8)]
@@ -239,8 +252,11 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
                        disabled:opacity-50 disabled:cursor-not-allowed
                        transition-all duration-200 cursor-pointer"
           >
-            {isConnecting ? (
-              <div className="w-8 h-8 rounded-full border-3 border-white border-t-transparent animate-spin" />
+            {uploading ? (
+              <div className="flex flex-col items-center">
+                <div className="w-6 h-6 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                <span className="text-xs text-white mt-1">{uploadProgress}%</span>
+              </div>
             ) : (
               <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
@@ -252,7 +268,7 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
           <div className="flex items-center gap-4">
             {/* Pause/Resume */}
             <button
-              onClick={handlePause}
+              onClick={isPaused ? resumeRecording : pauseRecording}
               className="w-16 h-16 rounded-full flex items-center justify-center
                          bg-gray-200 text-slate-600
                          shadow-[4px_4px_10px_rgba(0,0,0,0.1),-4px_-4px_10px_rgba(255,255,255,0.8)]
@@ -272,7 +288,7 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
 
             {/* Stop */}
             <button
-              onClick={handleStop}
+              onClick={stopRecording}
               className="w-20 h-20 rounded-full flex items-center justify-center
                          bg-gradient-to-br from-red-400 to-red-500
                          shadow-[6px_6px_15px_rgba(239,68,68,0.4)]
@@ -304,33 +320,32 @@ export function SessionRecorder({ project, onComplete, onCancel }: SessionRecord
 
         {/* Status */}
         <div className="mt-4 text-center">
-          {isRecording ? (
+          {uploading ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-600">上传中... {uploadProgress}%</span>
+            </div>
+          ) : isRecording ? (
             <div className="flex items-center gap-2">
               <span className={`w-3 h-3 rounded-full ${isPaused ? 'bg-yellow-400' : 'bg-red-500 animate-pulse'}`} />
               <span className="text-sm text-slate-600">
                 {isPaused ? '已暂停' : '录音中...'}
               </span>
             </div>
-          ) : isConnecting ? (
-            <span className="text-sm text-slate-500">正在连接...</span>
           ) : (
             <span className="text-sm text-slate-400">点击开始录音</span>
           )}
         </div>
       </div>
 
-      {/* Real-time Transcript Preview */}
+      {/* Instructions */}
       <div className="p-4 rounded-2xl bg-gray-50
                       shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-medium text-slate-700 font-heading">实时转写预览</h3>
-          <span className="text-xs text-slate-400">{transcript.length} 字</span>
-        </div>
-        <div className="h-40 overflow-y-auto text-sm text-slate-600 font-body whitespace-pre-wrap">
-          {transcript || (
-            <span className="text-slate-400">转写内容将在此显示...</span>
-          )}
-        </div>
+        <h3 className="font-medium text-slate-700 mb-2 font-heading">录音说明</h3>
+        <ul className="text-sm text-slate-600 space-y-1">
+          <li>• 录音完成后将自动上传并开始转写</li>
+          <li>• 转写完成后会根据提纲自动提取信息</li>
+          <li>• 音频文件保存在项目中，可随时导出</li>
+        </ul>
       </div>
     </div>
   );

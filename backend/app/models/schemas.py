@@ -183,6 +183,13 @@ class ProjectUpdate(BaseModel):
     outline_id: Optional[str] = None
 
 
+class ProjectWithOutlineImport(BaseModel):
+    """同时创建项目和提纲的请求"""
+    project_name: Optional[str] = None  # 可选，如果不提供则从 Markdown 标题提取
+    description: Optional[str] = None
+    markdown_content: str  # Markdown 格式的提纲内容
+
+
 class ProjectResponse(BaseModel):
     """项目响应"""
     id: str

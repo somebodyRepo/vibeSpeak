@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { createSession } from '../../lib/api';
+import { getAuthHeaders } from '../../lib/auth';
+import { getApiBase } from '../../lib/config';
 
 interface SessionImporterProps {
   projectId: string;
@@ -11,6 +12,8 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [currentFileName, setCurrentFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -22,24 +25,90 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
     setFiles(validFiles);
   };
 
+  // 使用 XMLHttpRequest 上传单个文件，获取真实进度
+  const uploadFileWithProgress = async (projectId: string, file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      const authHeaders = getAuthHeaders();
+
+      // 监听上传进度
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const fileProgress = Math.round((event.loaded / event.total) * 100);
+          // 计算总进度：当前文件的进度 + 已完成文件
+          const totalProgress = Math.round(
+            ((currentFileIndex * 100) + fileProgress) / files.length
+          );
+          setProgress(totalProgress);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const response = JSON.parse(xhr.responseText);
+          resolve(response.id);
+        } else {
+          try {
+            const error = JSON.parse(xhr.responseText);
+            reject(new Error(error.detail || `Upload failed: ${xhr.status}`));
+          } catch {
+            reject(new Error(`Upload failed: ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during upload'));
+      };
+
+      xhr.ontimeout = () => {
+        reject(new Error('Upload timeout'));
+      };
+
+      // 设置超时时间（大文件可能需要更长）
+      xhr.timeout = 600000; // 10 minutes
+
+      xhr.open('POST', `${getApiBase()}/sessions/?project_id=${projectId}`);
+
+      // 设置认证 header
+      if (authHeaders.Authorization) {
+        xhr.setRequestHeader('Authorization', authHeaders.Authorization);
+      }
+
+      xhr.send(formData);
+    });
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) return;
 
     setUploading(true);
     setProgress(0);
+    setCurrentFileIndex(0);
 
     try {
-      if (files.length === 1) {
-        // 单文件上传
-        await createSession(projectId, files[0]);
-        setProgress(100);
-      } else {
-        // 批量上传 - 顺序处理
-        for (let i = 0; i < files.length; i++) {
-          await createSession(projectId, files[i]);
-          setProgress(Math.round(((i + 1) / files.length) * 100));
-        }
+      const uploadedIds: string[] = [];
+
+      for (let i = 0; i < files.length; i++) {
+        setCurrentFileIndex(i);
+        setCurrentFileName(files[i].name);
+
+        const sessionId = await uploadFileWithProgress(projectId, files[i]);
+        uploadedIds.push(sessionId);
+
+        // 更新进度到该文件完成
+        setProgress(Math.round(((i + 1) / files.length) * 100));
       }
+
+      // 显示成功消息
+      setProgress(100);
+      setCurrentFileName('');
+
+      // 等待一小段时间让用户看到完成状态
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       onComplete();
       onClose();
@@ -47,7 +116,25 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
       alert('上传失败: ' + (err instanceof Error ? err.message : '未知错误'));
     } finally {
       setUploading(false);
+      setCurrentFileIndex(0);
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    const validFiles = droppedFiles.filter(file => {
+      const ext = file.name.toLowerCase().split('.').pop();
+      return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(ext || '');
+    });
+    setFiles(validFiles);
   };
 
   return (
@@ -60,10 +147,14 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
 
         {/* File Drop Zone */}
         <div
-          onClick={() => fileInputRef.current?.click()}
-          className="p-8 border-2 border-dashed border-gray-300 rounded-xl
-                     text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50
-                     transition-colors"
+          onClick={() => !uploading && fileInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className={`p-8 border-2 border-dashed rounded-xl
+                     text-center cursor-pointer transition-colors
+                     ${uploading
+                       ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                       : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}
         >
           <input
             ref={fileInputRef}
@@ -72,15 +163,18 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
             multiple
             onChange={handleFileSelect}
             className="hidden"
+            disabled={uploading}
           />
-          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-blue-100 flex items-center justify-center">
-            <svg className="w-6 h-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className={`w-12 h-12 mx-auto mb-3 rounded-full flex items-center justify-center
+                          ${uploading ? 'bg-gray-100' : 'bg-blue-100'}`}>
+            <svg className={`w-6 h-6 ${uploading ? 'text-gray-400' : 'text-blue-500'}`}
+                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
-          <p className="text-sm text-slate-600 font-body">
-            点击选择或拖拽音频文件
+          <p className={`text-sm font-body ${uploading ? 'text-slate-400' : 'text-slate-600'}`}>
+            {uploading ? '上传进行中...' : '点击选择或拖拽音频文件'}
           </p>
           <p className="text-xs text-slate-400 mt-1">
             支持 WAV, MP3, M4A, FLAC, OGG, WebM
@@ -88,7 +182,7 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
         </div>
 
         {/* Selected Files */}
-        {files.length > 0 && (
+        {files.length > 0 && !uploading && (
           <div className="mt-4 p-3 rounded-xl bg-gray-50">
             <p className="text-sm font-medium text-slate-600 mb-2">
               已选择 {files.length} 个文件:
@@ -112,8 +206,23 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
         {/* Progress */}
         {uploading && (
           <div className="mt-4">
+            {/* Current file info */}
+            {currentFileName && (
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                <span className="text-sm text-slate-600 truncate">
+                  正在上传: {currentFileName}
+                </span>
+              </div>
+            )}
+
+            {/* Progress bar */}
             <div className="flex justify-between text-xs text-slate-500 mb-1">
-              <span>上传中...</span>
+              <span>
+                {files.length > 1
+                  ? `文件 ${currentFileIndex + 1}/${files.length}`
+                  : '上传中...'}
+              </span>
               <span>{progress}%</span>
             </div>
             <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
@@ -122,6 +231,11 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
                 style={{ width: `${progress}%` }}
               />
             </div>
+
+            {/* Processing hint */}
+            <p className="text-xs text-slate-400 mt-2">
+              上传完成后将自动开始转写和信息提取
+            </p>
           </div>
         )}
 
@@ -145,7 +259,9 @@ export function SessionImporter({ projectId, onComplete, onClose }: SessionImpor
                        disabled:opacity-50 disabled:cursor-not-allowed
                        cursor-pointer transition-all"
           >
-            {uploading ? '上传中...' : `上传 ${files.length} 个文件`}
+            {uploading
+              ? (progress < 100 ? '上传中...' : '完成!')
+              : `上传 ${files.length} 个文件`}
           </button>
         </div>
       </div>

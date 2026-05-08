@@ -1,4 +1,5 @@
 import json
+import re
 import zipfile
 import io
 from datetime import datetime
@@ -14,10 +15,12 @@ from app.models.database import OutlineDB, ProjectDB, InterviewSessionDB, get_db
 from app.models.schemas import (
     OutlineContent,
     OutlineResponse,
+    OutlineSection,
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
     ProjectUpdate,
+    ProjectWithOutlineImport,
     SessionResponse,
 )
 
@@ -359,4 +362,123 @@ async def export_project(
         headers={
             "Content-Disposition": f"attachment; filename={project.name}_export.zip"
         }
+    )
+
+
+# ===== 合并创建项目和提纲 =====
+
+
+def parse_markdown_with_title(content: str) -> tuple[str, OutlineContent]:
+    """
+    解析 Markdown 内容，提取标题作为项目名，其余作为提纲
+    Returns: (project_name, outline_content)
+    """
+    lines = content.strip().split("\n")
+    project_name = ""
+    sections = []
+    current_section = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 匹配标题
+        header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if header_match:
+            header_level = len(header_match.group(1))
+            title = header_match.group(2)
+
+            # 第一个一级标题作为项目名
+            if header_level == 1 and not project_name:
+                # 移除常见的后缀词
+                project_name = title
+                for suffix in ["提纲", "大纲", "问卷", "调研提纲", "访谈提纲"]:
+                    if project_name.endswith(suffix):
+                        project_name = project_name[:-len(suffix)].strip()
+                        break
+                continue
+
+            # 其他标题作为板块
+            if current_section:
+                sections.append(current_section)
+
+            current_section = OutlineSection(
+                id=f"s{len(sections) + 1}",
+                title=title,
+                questions=[]
+            )
+
+        elif current_section:
+            # 匹配列表项
+            list_match = re.match(r"^[-*]\s+(.+)$|^\d+\.\s+(.+)$", line)
+            if list_match:
+                question_text = list_match.group(1) or list_match.group(2)
+                current_section.questions.append(question_text)
+
+    # 保存最后一个板块
+    if current_section:
+        sections.append(current_section)
+
+    # 如果没有提取到项目名，使用默认值
+    if not project_name:
+        project_name = "新建项目"
+
+    return project_name, OutlineContent(sections=sections)
+
+
+@router.post("/import-with-outline", response_model=ProjectResponse)
+async def import_project_with_outline(
+    request: ProjectWithOutlineImport,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    同时创建项目和提纲
+    - 从 Markdown 内容解析标题作为项目名
+    - 其余内容作为提纲
+    """
+    # 解析 Markdown
+    extracted_name, outline_content = parse_markdown_with_title(request.markdown_content)
+
+    # 使用用户提供的项目名（如果有），否则使用解析出的名称
+    project_name = request.project_name or extracted_name
+
+    # 创建提纲
+    outline_id = str(uuid4())
+    outline = OutlineDB(
+        id=outline_id,
+        name=f"{project_name}提纲",
+        content=outline_content.model_dump_json(),
+    )
+    db.add(outline)
+
+    # 创建项目
+    project_id = str(uuid4())
+    project = ProjectDB(
+        id=project_id,
+        name=project_name,
+        description=request.description or "",
+        outline_id=outline_id,
+    )
+    db.add(project)
+
+    await db.commit()
+    await db.refresh(project)
+    await db.refresh(outline)
+
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        description=project.description,
+        outline_id=project.outline_id,
+        outline=OutlineResponse(
+            id=outline.id,
+            name=outline.name,
+            content=outline_content,
+            created_at=outline.created_at,
+            updated_at=outline.updated_at,
+        ),
+        session_count=0,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
     )

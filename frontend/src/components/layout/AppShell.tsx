@@ -2,19 +2,18 @@ import { useState } from 'react';
 import { NavBar } from './NavBar';
 import { ProjectList } from '../projects/ProjectList';
 import { ProjectEditor } from '../projects/ProjectEditor';
-import { OutlineEditor } from '../projects/OutlineEditor';
+import { ProjectWithOutlineCreator } from '../projects/ProjectWithOutlineCreator';
 import { SessionList } from '../sessions/SessionList';
 import { SessionViewer } from '../sessions/SessionViewer';
 import { SessionImporter } from '../sessions/SessionImporter';
 import { SessionRecorder } from '../sessions/SessionRecorder';
 import { ExportPanel } from '../export/ExportPanel';
-import type { Project, InterviewSession, Outline } from '../../types';
+import type { Project, InterviewSession } from '../../types';
 
 type View =
   | 'project-list'
   | 'project-new'
   | 'project-edit'
-  | 'outline-new'
   | 'project-detail'
   | 'session-detail'
   | 'recording';
@@ -52,11 +51,6 @@ export function AppShell() {
   const handleSaveProject = (project: Project) => {
     setSelectedProject(project);
     setView('project-detail');
-  };
-
-  const handleSaveOutline = (_outline: Outline) => {
-    // 刷新项目以关联新提纲
-    setView('project-new');
   };
 
   const handleImportAudio = () => {
@@ -104,20 +98,10 @@ export function AppShell() {
             )}
 
             {view === 'project-new' && (
-              <div className="space-y-4">
-                <ProjectEditor
-                  onSave={handleSaveProject}
-                  onCancel={handleBackToProjects}
-                />
-                <button
-                  onClick={() => setView('outline-new')}
-                  className="w-full py-2.5 rounded-xl text-sm font-medium text-purple-600
-                             bg-purple-50 hover:bg-purple-100 border-2 border-dashed border-purple-200
-                             cursor-pointer"
-                >
-                  或创建新提纲
-                </button>
-              </div>
+              <ProjectWithOutlineCreator
+                onSave={handleSaveProject}
+                onCancel={handleBackToProjects}
+              />
             )}
 
             {view === 'project-edit' && selectedProject && (
@@ -125,13 +109,6 @@ export function AppShell() {
                 project={selectedProject}
                 onSave={handleSaveProject}
                 onCancel={handleBackToProject}
-              />
-            )}
-
-            {view === 'outline-new' && (
-              <OutlineEditor
-                onSave={handleSaveOutline}
-                onCancel={() => setView('project-new')}
               />
             )}
 
@@ -244,30 +221,43 @@ export function AppShell() {
         )}
 
         {activeTab === 'record' && (
-          <div className="flex flex-col items-center justify-center h-64 rounded-2xl bg-gray-100 text-slate-500">
-            {selectedProject ? (
-              <div className="text-center">
-                <p className="text-lg font-medium text-slate-700 mb-2">
-                  {selectedProject.name}
-                </p>
-                <button
-                  onClick={handleStartRecording}
-                  className="px-6 py-3 rounded-xl text-sm font-medium text-white
-                             bg-gradient-to-r from-orange-400 to-orange-500
-                             shadow-[0_4px_12px_rgba(251,146,60,0.3)]
-                             hover:shadow-[0_6px_20px_rgba(251,146,60,0.4)]
-                             transition-all duration-200 cursor-pointer"
-                >
-                  开始录音
-                </button>
-              </div>
+          <>
+            {view === 'recording' && selectedProject ? (
+              <SessionRecorder
+                project={selectedProject}
+                onComplete={handleRecordingComplete}
+                onCancel={() => {
+                  setView('project-list');
+                  setActiveTab('projects');
+                }}
+              />
             ) : (
-              <>
-                <p className="text-lg font-medium">请先选择一个项目</p>
-                <p className="text-sm mt-2">在项目管理中选择项目后可开始录音</p>
-              </>
+              <div className="flex flex-col items-center justify-center h-64 rounded-2xl bg-gray-100 text-slate-500">
+                {selectedProject ? (
+                  <div className="text-center">
+                    <p className="text-lg font-medium text-slate-700 mb-2">
+                      {selectedProject.name}
+                    </p>
+                    <button
+                      onClick={handleStartRecording}
+                      className="px-6 py-3 rounded-xl text-sm font-medium text-white
+                                 bg-gradient-to-r from-orange-400 to-orange-500
+                                 shadow-[0_4px_12px_rgba(251,146,60,0.3)]
+                                 hover:shadow-[0_6px_20px_rgba(251,146,60,0.4)]
+                                 transition-all duration-200 cursor-pointer"
+                    >
+                      开始录音
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-lg font-medium">请先选择一个项目</p>
+                    <p className="text-sm mt-2">在项目管理中选择项目后可开始录音</p>
+                  </>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </main>
     </div>

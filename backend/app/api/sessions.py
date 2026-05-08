@@ -129,6 +129,9 @@ async def create_session(
     await db.commit()
     await db.refresh(session)
 
+    # 自动启动处理管道
+    asyncio.create_task(process_session_pipeline(session_id))
+
     return SessionResponse(
         id=session.id,
         project_id=session.project_id,
@@ -203,6 +206,10 @@ async def batch_import_sessions(
         created_sessions.append(session_id)
 
     await db.commit()
+
+    # 自动启动处理管道（每个 session）
+    for session_id in created_sessions:
+        asyncio.create_task(process_session_pipeline(session_id))
 
     return {
         "success": True,
@@ -356,6 +363,102 @@ async def delete_session(
 
 
 # ===== 处理流程 API =====
+
+
+async def process_session_pipeline(session_id: str):
+    """
+    自动处理管道：转写 → 提取信息 → 验证补充 → 生成最终内容
+    上传完成后自动调用此函数
+    """
+    print(f"[Pipeline] Starting for session {session_id}")
+
+    async with AsyncSessionLocal() as db:
+        try:
+            # Step 1: 转写
+            print(f"[Pipeline] Step 1: Transcribing...")
+            result = await db.execute(
+                select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
+            )
+            session = result.scalar_one()
+            session.status = "transcribing"
+            await db.commit()
+
+            audio_path = Path(session.audio_path)
+            segments, raw_text = await asr_service.transcribe_file(audio_path)
+            session.raw_transcript = raw_text
+            await db.commit()
+            print(f"[Pipeline] Transcription done: {len(raw_text)} chars")
+
+            # Step 2: 提取信息
+            print(f"[Pipeline] Step 2: Extracting info...")
+            project_result = await db.execute(
+                select(ProjectDB).where(ProjectDB.id == session.project_id)
+            )
+            project = project_result.scalar_one_or_none()
+
+            if project and project.outline_id:
+                outline_result = await db.execute(
+                    select(OutlineDB).where(OutlineDB.id == project.outline_id)
+                )
+                outline_db = outline_result.scalar_one_or_none()
+
+                if outline_db:
+                    session.status = "extracting"
+                    await db.commit()
+
+                    outline_content = OutlineContent.model_validate_json(outline_db.content)
+                    extracted = await llm_service.extract_info_by_outline(
+                        transcript=raw_text,
+                        outline=outline_content.model_dump(),
+                    )
+                    session.extracted_info = json.dumps(extracted, ensure_ascii=False)
+                    await db.commit()
+                    print(f"[Pipeline] Extraction done")
+
+                    # Step 3: 验证补充
+                    print(f"[Pipeline] Step 3: Validating...")
+                    session.status = "validating"
+                    await db.commit()
+
+                    validation_result = await llm_service.validate_extraction(
+                        transcript=raw_text,
+                        extracted_info=extracted,
+                        outline=outline_content.model_dump(),
+                    )
+
+                    if validation_result.get("missing_info"):
+                        session.supplementary_info = validation_result.get("missing_info", "")
+
+                    await db.commit()
+                    print(f"[Pipeline] Validation done")
+
+                    # Step 4: 生成最终内容
+                    print(f"[Pipeline] Step 4: Generating final content...")
+                    final_content = await llm_service.generate_final_content(
+                        extracted_info=extracted,
+                        supplementary_info=session.supplementary_info or "",
+                    )
+                    session.final_content = final_content
+                    print(f"[Pipeline] Final content generated")
+
+            # 完成
+            session.status = "done"
+            await db.commit()
+            print(f"[Pipeline] Completed for session {session_id}")
+
+        except Exception as e:
+            print(f"[Pipeline] Error for session {session_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                result = await db.execute(
+                    select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
+                )
+                session = result.scalar_one()
+                session.status = "error"
+                await db.commit()
+            except:
+                pass
 
 
 async def process_transcription(session_id: str):
