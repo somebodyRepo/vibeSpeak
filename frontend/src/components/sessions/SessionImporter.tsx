@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { createSession, batchImportSessions } from '../../lib/api';
+import { createSession } from '../../lib/api';
 
 interface SessionImporterProps {
   projectId: string;

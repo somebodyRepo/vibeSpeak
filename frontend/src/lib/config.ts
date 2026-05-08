@@ -81,7 +81,12 @@ export function getApiBase(): string {
  */
 export function getWsBase(): string {
   const config = getConfig();
-  return config.backend.host
+  const host = config.backend.host;
+  // 如果 host 为空，使用当前页面的协议和主机
+  if (!host) {
+    return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+  }
+  return host
     .replace('http:', 'ws:')
     .replace('https:', 'wss:');
 }

@@ -6,9 +6,11 @@ interface SessionListProps {
   project: Project;
   onSelect: (session: InterviewSession) => void;
   onImport: () => void;
+  onRecord?: () => void;
+  onSessionsLoad?: (sessions: InterviewSession[]) => void;
 }
 
-export function SessionList({ project, onSelect, onImport }: SessionListProps) {
+export function SessionList({ project, onSelect, onImport, onRecord, onSessionsLoad }: SessionListProps) {
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
@@ -17,12 +19,13 @@ export function SessionList({ project, onSelect, onImport }: SessionListProps) {
     try {
       const data = await listSessions(project.id);
       setSessions(data.sessions);
+      onSessionsLoad?.(data.sessions);
     } catch (err) {
       console.error('Failed to load sessions:', err);
     } finally {
       setLoading(false);
     }
-  }, [project.id]);
+  }, [project.id, onSessionsLoad]);
 
   useEffect(() => {
     loadSessions();
@@ -117,16 +120,30 @@ export function SessionList({ project, onSelect, onImport }: SessionListProps) {
         <h3 className="text-lg font-heading font-semibold text-slate-800">
           访谈记录 ({sessions.length})
         </h3>
-        <button
-          onClick={onImport}
-          className="px-3 py-1.5 rounded-lg text-sm font-medium text-white
-                     bg-gradient-to-r from-orange-400 to-orange-500
-                     shadow-[0_4px_10px_rgba(251,146,60,0.3)]
-                     hover:shadow-[0_6px_14px_rgba(251,146,60,0.4)]
-                     transition-all duration-200 cursor-pointer"
-        >
-          + 导入音频
-        </button>
+        <div className="flex gap-2">
+          {onRecord && (
+            <button
+              onClick={onRecord}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium text-white
+                         bg-gradient-to-r from-red-400 to-red-500
+                         shadow-[0_4px_10px_rgba(239,68,68,0.3)]
+                         hover:shadow-[0_6px_14px_rgba(239,68,68,0.4)]
+                         transition-all duration-200 cursor-pointer"
+            >
+              🎤 录音
+            </button>
+          )}
+          <button
+            onClick={onImport}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium text-white
+                       bg-gradient-to-r from-orange-400 to-orange-500
+                       shadow-[0_4px_10px_rgba(251,146,60,0.3)]
+                       hover:shadow-[0_6px_14px_rgba(251,146,60,0.4)]
+                       transition-all duration-200 cursor-pointer"
+          >
+            + 导入音频
+          </button>
+        </div>
       </div>
 
       {/* Sessions List */}

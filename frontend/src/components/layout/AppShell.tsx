@@ -6,6 +6,8 @@ import { OutlineEditor } from '../projects/OutlineEditor';
 import { SessionList } from '../sessions/SessionList';
 import { SessionViewer } from '../sessions/SessionViewer';
 import { SessionImporter } from '../sessions/SessionImporter';
+import { SessionRecorder } from '../sessions/SessionRecorder';
+import { ExportPanel } from '../export/ExportPanel';
 import type { Project, InterviewSession, Outline } from '../../types';
 
 type View =
@@ -14,7 +16,8 @@ type View =
   | 'project-edit'
   | 'outline-new'
   | 'project-detail'
-  | 'session-detail';
+  | 'session-detail'
+  | 'recording';
 
 export function AppShell() {
   const [activeTab, setActiveTab] = useState<'projects' | 'record'>('projects');
@@ -22,6 +25,8 @@ export function AppShell() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [showImporter, setShowImporter] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [sessions, setSessions] = useState<InterviewSession[]>([]);
 
   const handleSelectProject = (project: Project) => {
     setSelectedProject(project);
@@ -49,7 +54,7 @@ export function AppShell() {
     setView('project-detail');
   };
 
-  const handleSaveOutline = (outline: Outline) => {
+  const handleSaveOutline = (_outline: Outline) => {
     // 刷新项目以关联新提纲
     setView('project-new');
   };
@@ -70,6 +75,18 @@ export function AppShell() {
 
   const handleImportComplete = () => {
     // 刷新会话列表
+  };
+
+  const handleStartRecording = () => {
+    setView('recording');
+  };
+
+  const handleRecordingComplete = (_sessionId: string) => {
+    setView('project-detail');
+  };
+
+  const handleOpenExport = () => {
+    setShowExport(true);
   };
 
   return (
@@ -140,13 +157,22 @@ export function AppShell() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={handleEditProject}
-                    className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
-                               bg-gray-100 hover:bg-gray-200 cursor-pointer"
-                  >
-                    编辑项目
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleOpenExport}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
+                                 bg-gray-100 hover:bg-gray-200 cursor-pointer"
+                    >
+                      批量导出
+                    </button>
+                    <button
+                      onClick={handleEditProject}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
+                                 bg-gray-100 hover:bg-gray-200 cursor-pointer"
+                    >
+                      编辑项目
+                    </button>
+                  </div>
                 </div>
 
                 {/* Outline Preview */}
@@ -176,8 +202,18 @@ export function AppShell() {
                   project={selectedProject}
                   onSelect={handleSelectSession}
                   onImport={handleImportAudio}
+                  onRecord={handleStartRecording}
+                  onSessionsLoad={setSessions}
                 />
               </div>
+            )}
+
+            {view === 'recording' && selectedProject && (
+              <SessionRecorder
+                project={selectedProject}
+                onComplete={handleRecordingComplete}
+                onCancel={() => setView('project-detail')}
+              />
             )}
 
             {view === 'session-detail' && selectedSession && (
@@ -195,13 +231,42 @@ export function AppShell() {
                 onClose={() => setShowImporter(false)}
               />
             )}
+
+            {/* Export Modal */}
+            {showExport && selectedProject && (
+              <ExportPanel
+                project={selectedProject}
+                sessions={sessions}
+                onClose={() => setShowExport(false)}
+              />
+            )}
           </>
         )}
 
         {activeTab === 'record' && (
           <div className="flex flex-col items-center justify-center h-64 rounded-2xl bg-gray-100 text-slate-500">
-            <p className="text-lg font-medium">录音功能开发中...</p>
-            <p className="text-sm mt-2">请先使用 "导入音频" 功能上传已有录音文件</p>
+            {selectedProject ? (
+              <div className="text-center">
+                <p className="text-lg font-medium text-slate-700 mb-2">
+                  {selectedProject.name}
+                </p>
+                <button
+                  onClick={handleStartRecording}
+                  className="px-6 py-3 rounded-xl text-sm font-medium text-white
+                             bg-gradient-to-r from-orange-400 to-orange-500
+                             shadow-[0_4px_12px_rgba(251,146,60,0.3)]
+                             hover:shadow-[0_6px_20px_rgba(251,146,60,0.4)]
+                             transition-all duration-200 cursor-pointer"
+                >
+                  开始录音
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-lg font-medium">请先选择一个项目</p>
+                <p className="text-sm mt-2">在项目管理中选择项目后可开始录音</p>
+              </>
+            )}
           </div>
         )}
       </main>
