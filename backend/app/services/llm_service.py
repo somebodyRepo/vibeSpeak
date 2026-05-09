@@ -56,6 +56,7 @@ class LLMService:
 
     _instance = None
     _lock = asyncio.Lock()
+    _sync_lock = None  # 用于同步初始化的锁
 
     def __new__(cls):
         if cls._instance is None:
@@ -69,6 +70,31 @@ class LLMService:
         self._initialized = False
         self._sync_client = None
 
+    def _initialize_sync(self):
+        """同步初始化（用于线程池调用）"""
+        import threading
+        if self._sync_lock is None:
+            self._sync_lock = threading.Lock()
+
+        with self._sync_lock:
+            if self._initialized:
+                return
+
+            if settings.llm_base_url and settings.llm_api_key:
+                self._sync_client = OpenAI(
+                    api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url,
+                    timeout=60.0,
+                    max_retries=2,
+                )
+                self.model = settings.llm_model
+            else:
+                self._sync_client = None
+                self.model = None
+
+            self._initialized = True
+            print("LLM service initialized (sync)")
+
     async def initialize(self):
         if self._initialized:
             return
@@ -78,14 +104,8 @@ class LLMService:
                 return
 
             if settings.llm_base_url and settings.llm_api_key:
+                # 创建异步客户端
                 self.client = AsyncOpenAI(
-                    api_key=settings.llm_api_key,
-                    base_url=settings.llm_base_url,
-                    timeout=60.0,
-                    max_retries=2,
-                )
-                # 同步客户端，用于线程池调用
-                self._sync_client = OpenAI(
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
                     timeout=60.0,
@@ -94,10 +114,10 @@ class LLMService:
                 self.model = settings.llm_model
             else:
                 self.client = None
-                self._sync_client = None
                 self.model = None
 
             self._initialized = True
+            print("LLM service initialized (async)")
 
     def _get_system_prompt(self, style: Literal["standard", "formal", "concise"]) -> str:
         if style == "formal":
@@ -400,9 +420,7 @@ class LLMService:
 
     def _ensure_sync_client(self):
         """确保同步客户端已初始化"""
-        if not self._initialized:
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(self.initialize())
+        self._initialize_sync()
         return self._sync_client is not None
 
     def extract_info_by_outline_sync(

@@ -17,6 +17,7 @@ class ASRService:
 
     _instance = None
     _lock = asyncio.Lock()
+    _sync_lock = None  # 用于同步初始化的锁
 
     def __new__(cls):
         if cls._instance is None:
@@ -32,12 +33,13 @@ class ASRService:
         self.vad_model = None
         self._initialized = False
 
-    async def initialize(self):
-        """懒加载模型"""
-        if self._initialized:
-            return
+    def _initialize_sync(self):
+        """同步初始化（用于线程池调用）"""
+        import threading
+        if self._sync_lock is None:
+            self._sync_lock = threading.Lock()
 
-        async with self._lock:
+        with self._sync_lock:
             if self._initialized:
                 return
 
@@ -53,13 +55,6 @@ class ASRService:
 
             print(f"Loading ASR models on {device}...")
 
-            # Load VAD model
-            self.vad_model = AutoModel(
-                model=settings.vad_model_name,
-                device=device,
-                disable_pbar=True,
-            )
-
             # Load ASR model (SenseVoiceSmall)
             self.model = AutoModel(
                 model=settings.asr_model_name,
@@ -71,6 +66,16 @@ class ASRService:
 
             self._initialized = True
             print("ASR models loaded successfully")
+
+    async def initialize(self):
+        """懒加载模型（异步版本）"""
+        if self._initialized:
+            return
+
+        async with self._lock:
+            if self._initialized:
+                return
+            self._initialize_sync()
 
     async def transcribe_file(
         self,
@@ -95,9 +100,7 @@ class ASRService:
         Returns: (segments, full_text)
         """
         # 确保已初始化（同步方式）
-        if not self._initialized:
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(self.initialize())
+        self._initialize_sync()
 
         # FunASR generate
         result = self.model.generate(
