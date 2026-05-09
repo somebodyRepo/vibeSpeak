@@ -368,7 +368,7 @@ async def delete_session(
 async def process_session_pipeline(session_id: str):
     """
     自动处理管道：转写 → 提取信息 → 验证补充 → 生成最终内容
-    上传完成后自动调用此函数
+    上传完成后自动调用此函数，使用线程池执行阻塞操作
     """
     print(f"[Pipeline] Starting for session {session_id}")
 
@@ -384,7 +384,10 @@ async def process_session_pipeline(session_id: str):
             await db.commit()
 
             audio_path = Path(session.audio_path)
-            segments, raw_text = await asr_service.transcribe_file(audio_path)
+            # 在线程池中执行阻塞的 ASR 操作
+            segments, raw_text = await asyncio.to_thread(
+                asr_service.transcribe_file_sync, audio_path
+            )
             session.raw_transcript = raw_text
             await db.commit()
             print(f"[Pipeline] Transcription done: {len(raw_text)} chars")
@@ -407,9 +410,11 @@ async def process_session_pipeline(session_id: str):
                     await db.commit()
 
                     outline_content = OutlineContent.model_validate_json(outline_db.content)
-                    extracted = await llm_service.extract_info_by_outline(
-                        transcript=raw_text,
-                        outline=outline_content.model_dump(),
+                    # 在线程池中执行阻塞的 LLM 操作
+                    extracted = await asyncio.to_thread(
+                        llm_service.extract_info_by_outline_sync,
+                        raw_text,
+                        outline_content.model_dump(),
                     )
                     session.extracted_info = json.dumps(extracted, ensure_ascii=False)
                     await db.commit()
@@ -420,10 +425,11 @@ async def process_session_pipeline(session_id: str):
                     session.status = "validating"
                     await db.commit()
 
-                    validation_result = await llm_service.validate_extraction(
-                        transcript=raw_text,
-                        extracted_info=extracted,
-                        outline=outline_content.model_dump(),
+                    validation_result = await asyncio.to_thread(
+                        llm_service.validate_extraction_sync,
+                        raw_text,
+                        extracted,
+                        outline_content.model_dump(),
                     )
 
                     if validation_result.get("missing_info"):
@@ -434,9 +440,10 @@ async def process_session_pipeline(session_id: str):
 
                     # Step 4: 生成最终内容
                     print(f"[Pipeline] Step 4: Generating final content...")
-                    final_content = await llm_service.generate_final_content(
-                        extracted_info=extracted,
-                        supplementary_info=session.supplementary_info or "",
+                    final_content = await asyncio.to_thread(
+                        llm_service.generate_final_content_sync,
+                        extracted,
+                        session.supplementary_info or "",
                     )
                     session.final_content = final_content
                     print(f"[Pipeline] Final content generated")

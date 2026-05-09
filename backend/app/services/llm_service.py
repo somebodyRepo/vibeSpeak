@@ -1,7 +1,8 @@
 import asyncio
+import json
 from typing import AsyncIterator, Literal, Optional
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.core.config import get_settings
 
@@ -66,6 +67,7 @@ class LLMService:
         if self._initialized:
             return
         self._initialized = False
+        self._sync_client = None
 
     async def initialize(self):
         if self._initialized:
@@ -82,9 +84,17 @@ class LLMService:
                     timeout=60.0,
                     max_retries=2,
                 )
+                # 同步客户端，用于线程池调用
+                self._sync_client = OpenAI(
+                    api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url,
+                    timeout=60.0,
+                    max_retries=2,
+                )
                 self.model = settings.llm_model
             else:
                 self.client = None
+                self._sync_client = None
                 self.model = None
 
             self._initialized = True
@@ -384,6 +394,131 @@ class LLMService:
 
         except Exception as e:
             print(f"Generate final content error: {e}")
+            return ""
+
+    # ===== 同步版本方法（用于线程池调用）=====
+
+    def _ensure_sync_client(self):
+        """确保同步客户端已初始化"""
+        if not self._initialized:
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(self.initialize())
+        return self._sync_client is not None
+
+    def extract_info_by_outline_sync(
+        self,
+        transcript: str,
+        outline: dict,
+    ) -> dict:
+        """根据提纲从转写文本中提取结构化信息（同步版本）"""
+        if not self._ensure_sync_client():
+            return {"sections": [], "additional_info": ""}
+
+        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
+        system_prompt = self.EXTRACT_INFO_PROMPT.format(outline_json=outline_json)
+
+        try:
+            response = self._sync_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": transcript},
+                ],
+                temperature=0.3,
+            )
+            result_text = response.choices[0].message.content
+
+            # 尝试解析 JSON
+            try:
+                if result_text.startswith("```"):
+                    result_text = result_text.split("```")[1]
+                    if result_text.startswith("json"):
+                        result_text = result_text[4:]
+                result = json.loads(result_text.strip())
+                return result
+            except json.JSONDecodeError:
+                return {"sections": [], "additional_info": result_text}
+
+        except Exception as e:
+            print(f"Extract info sync error: {e}")
+            return {"sections": [], "additional_info": ""}
+
+    def validate_extraction_sync(
+        self,
+        transcript: str,
+        extracted_info: dict,
+        outline: dict,
+    ) -> dict:
+        """验证提取信息，找出遗漏内容（同步版本）"""
+        if not self._ensure_sync_client():
+            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+
+        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
+        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
+        system_prompt = self.VALIDATE_EXTRACTION_PROMPT.format(
+            transcript=transcript,
+            extracted_json=extracted_json,
+            outline_json=outline_json,
+        )
+
+        try:
+            response = self._sync_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "请验证并输出结果"},
+                ],
+                temperature=0.3,
+            )
+            result_text = response.choices[0].message.content
+
+            try:
+                if result_text.startswith("```"):
+                    result_text = result_text.split("```")[1]
+                    if result_text.startswith("json"):
+                        result_text = result_text[4:]
+                result = json.loads(result_text.strip())
+                return result
+            except json.JSONDecodeError:
+                return {
+                    "missing_info": result_text,
+                    "suggestions": [],
+                    "accuracy_score": 0,
+                    "needs_review": True
+                }
+
+        except Exception as e:
+            print(f"Validate extraction sync error: {e}")
+            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+
+    def generate_final_content_sync(
+        self,
+        extracted_info: dict,
+        supplementary_info: str,
+    ) -> str:
+        """生成最终完善的访谈内容（同步版本）"""
+        if not self._ensure_sync_client():
+            return ""
+
+        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
+        system_prompt = self.FINAL_CONTENT_PROMPT.format(
+            extracted_json=extracted_json,
+            supplementary_info=supplementary_info,
+        )
+
+        try:
+            response = self._sync_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "请生成完整的调研记录"},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content
+
+        except Exception as e:
+            print(f"Generate final content sync error: {e}")
             return ""
 
 

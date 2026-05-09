@@ -89,20 +89,6 @@ async_engine = create_async_engine(
     connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
 )
 
-# Enable WAL mode for SQLite
-from sqlalchemy import event
-
-
-@event.listens_for(async_engine.sync_engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    """Enable WAL mode and other optimizations for SQLite"""
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA cache_size=10000")
-    cursor.execute("PRAGMA busy_timeout=30000")  # 30 seconds timeout
-    cursor.close()
-
 AsyncSessionLocal = async_sessionmaker(
     async_engine,
     class_=AsyncSession,

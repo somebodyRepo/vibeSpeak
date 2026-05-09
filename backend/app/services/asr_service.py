@@ -78,10 +78,26 @@ class ASRService:
         use_vad: bool = True,
     ) -> tuple[list[TranscriptionSegment], str]:
         """
-        离线批量转写
+        离线批量转写（异步包装）
         Returns: (segments, full_text)
         """
         await self.initialize()
+        # 在线程池中执行阻塞操作
+        return await asyncio.to_thread(self.transcribe_file_sync, audio_path, use_vad)
+
+    def transcribe_file_sync(
+        self,
+        audio_path: Path,
+        use_vad: bool = True,
+    ) -> tuple[list[TranscriptionSegment], str]:
+        """
+        离线批量转写（同步版本，用于线程池调用）
+        Returns: (segments, full_text)
+        """
+        # 确保已初始化（同步方式）
+        if not self._initialized:
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(self.initialize())
 
         # FunASR generate
         result = self.model.generate(
