@@ -8,9 +8,10 @@ interface SessionListProps {
   onImport: () => void;
   onRecord?: () => void;
   onSessionsLoad?: (sessions: InterviewSession[]) => void;
+  refreshKey?: number;
 }
 
-export function SessionList({ project, onSelect, onImport, onRecord, onSessionsLoad }: SessionListProps) {
+export function SessionList({ project, onSelect, onImport, onRecord, onSessionsLoad, refreshKey }: SessionListProps) {
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
   const [loading, setLoading] = useState(true);
   const pollingRef = useRef<number | null>(null);
@@ -29,10 +30,10 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
     }
   }, [project.id, onSessionsLoad]);
 
-  // 初始加载
+  // 初始加载 & refreshKey 变化时重新加载
   useEffect(() => {
     loadSessions();
-  }, [loadSessions]);
+  }, [loadSessions, refreshKey]);
 
   // 轮询：如果有处理中的会话，每隔几秒刷新
   useEffect(() => {

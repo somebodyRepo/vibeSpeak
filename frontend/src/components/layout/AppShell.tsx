@@ -26,6 +26,7 @@ export function AppShell() {
   const [showImporter, setShowImporter] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleSelectProject = (project: Project) => {
     setSelectedProject(project);
@@ -68,7 +69,8 @@ export function AppShell() {
   };
 
   const handleImportComplete = () => {
-    // 刷新会话列表
+    // 触发 SessionList 重新加载
+    setRefreshKey(prev => prev + 1);
   };
 
   const handleStartRecording = () => {
@@ -181,6 +183,7 @@ export function AppShell() {
                   onImport={handleImportAudio}
                   onRecord={handleStartRecording}
                   onSessionsLoad={setSessions}
+                  refreshKey={refreshKey}
                 />
               </div>
             )}
