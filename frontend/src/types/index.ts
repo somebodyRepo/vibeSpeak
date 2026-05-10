@@ -120,7 +120,7 @@ export interface ExportOptions {
   include_final: boolean;
   audio_format: 'wav' | 'mp3';
   transcript_format: 'txt' | 'json';
-  extracted_format: 'md' | 'txt';  // 改为 md 默认
+  extracted_format: 'json' | 'md' | 'txt';
   final_format: 'md' | 'txt';
   naming_pattern: string;
 }
