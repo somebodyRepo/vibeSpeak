@@ -113,14 +113,3 @@ export interface SessionUpdate {
   final_content?: string;
 }
 
-export interface ExportOptions {
-  include_audio: boolean;
-  include_transcript: boolean;
-  include_extracted: boolean;
-  include_final: boolean;
-  audio_format: 'wav' | 'mp3';
-  transcript_format: 'txt' | 'json';
-  extracted_format: 'json' | 'md' | 'txt';
-  final_format: 'md' | 'txt';
-  naming_pattern: string;
-}

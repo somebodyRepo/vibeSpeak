@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { exportSessionAudio, exportSessionTranscript, exportSessionExtracted, exportSessionFinal } from '../../lib/api';
-import type { Project, InterviewSession, ExportOptions } from '../../types';
+import { exportSessionExtracted, exportSessionFinal } from '../../lib/api';
+import type { Project, InterviewSession } from '../../types';
 
 interface ExportPanelProps {
   project: Project;
@@ -9,17 +9,6 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
-  const [options, setOptions] = useState<ExportOptions>({
-    include_audio: true,
-    include_transcript: true,
-    include_extracted: true,
-    include_final: false,
-    audio_format: 'wav',
-    transcript_format: 'txt',
-    extracted_format: 'json',
-    final_format: 'md',
-    naming_pattern: '{project}_{session}_{date}_{type}',
-  });
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -30,53 +19,20 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
     setProgress(0);
 
     try {
-      // 方案1: 使用项目导出 API (如果有后端支持)
-      // const blob = await exportProject(project.id);
-
-      // 方案2: 逐个导出并打包
       const files: { name: string; blob: Blob }[] = [];
       const totalSessions = sessions.length;
       let completed = 0;
 
       for (const session of sessions) {
         const date = new Date(session.created_at).toISOString().split('T')[0];
-        const baseName = options.naming_pattern
-          .replace('{project}', project.name)
-          .replace('{session}', session.filename)
-          .replace('{date}', date);
+        const baseName = `${project.name}_${session.filename}_${date}`;
 
-        // 导出音频
-        if (options.include_audio) {
-          try {
-            const audioBlob = await exportSessionAudio(session.id);
-            files.push({
-              name: `${baseName}_audio.${options.audio_format}`,
-              blob: audioBlob,
-            });
-          } catch {
-            // 音频可能不存在
-          }
-        }
-
-        // 导出转写文本
-        if (options.include_transcript && session.raw_transcript) {
-          try {
-            const transcriptBlob = await exportSessionTranscript(session.id);
-            files.push({
-              name: `${baseName}_transcript.${options.transcript_format}`,
-              blob: transcriptBlob,
-            });
-          } catch {
-            // 转写可能不存在
-          }
-        }
-
-        // 导出提取信息
-        if (options.include_extracted && session.extracted_info) {
+        // 导出提取信息 (Markdown)
+        if (session.extracted_info) {
           try {
             const extractedBlob = await exportSessionExtracted(session.id);
             files.push({
-              name: `${baseName}_extracted.${options.extracted_format}`,
+              name: `${baseName}_extracted.md`,
               blob: extractedBlob,
             });
           } catch {
@@ -84,12 +40,12 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
           }
         }
 
-        // 导出最终内容
-        if (options.include_final && session.final_content) {
+        // 导出最终内容 (Markdown)
+        if (session.final_content) {
           try {
             const finalBlob = await exportSessionFinal(session.id);
             files.push({
-              name: `${baseName}_final.${options.final_format}`,
+              name: `${baseName}_final.md`,
               blob: finalBlob,
             });
           } catch {
@@ -101,28 +57,16 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
         setProgress(Math.round((completed / totalSessions) * 100));
       }
 
-      // 如果有多个文件，打包为 ZIP
-      if (files.length > 1) {
-        // 使用浏览器原生 API 创建 ZIP（需要 JSZip 库）
-        // 这里简化为逐个下载
-        for (const file of files) {
-          const url = URL.createObjectURL(file.blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = file.name;
-          a.click();
-          URL.revokeObjectURL(url);
-          // 等待一下避免浏览器阻止
-          await new Promise((r) => setTimeout(r, 100));
-        }
-      } else if (files.length === 1) {
-        // 单文件直接下载
-        const url = URL.createObjectURL(files[0].blob);
+      // 逐个下载文件
+      for (const file of files) {
+        const url = URL.createObjectURL(file.blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = files[0].name;
+        a.download = file.name;
         a.click();
         URL.revokeObjectURL(url);
+        // 等待一下避免浏览器阻止
+        await new Promise((r) => setTimeout(r, 100));
       }
 
       setProgress(100);
@@ -136,6 +80,8 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
     }
   };
 
+  const validSessions = sessions.filter(s => s.extracted_info || s.final_content);
+
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
       <div className="w-full max-w-lg p-6 rounded-2xl bg-white
@@ -143,7 +89,7 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-heading font-semibold text-slate-800">
-            批量导出
+            批量导出 Markdown
           </h2>
           <button
             onClick={onClose}
@@ -161,76 +107,17 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
         <div className="mb-4 p-3 rounded-xl bg-gray-100 text-sm">
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-700">{project.name}</span>
-            <span className="text-slate-400">({sessions.length} 个访谈)</span>
+            <span className="text-slate-400">({validSessions.length} 个可导出)</span>
           </div>
         </div>
 
-        {/* Export Options */}
-        <div className="space-y-4">
-          {/* Content Selection */}
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2 font-body">
-              选择导出内容
-            </label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 cursor-pointer hover:bg-gray-100">
-                <input
-                  type="checkbox"
-                  checked={options.include_audio}
-                  onChange={(e) => setOptions({ ...options, include_audio: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-                />
-                <span className="text-sm text-slate-700">原始音频文件 (.wav)</span>
-              </label>
-              <label className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 cursor-pointer hover:bg-gray-100">
-                <input
-                  type="checkbox"
-                  checked={options.include_transcript}
-                  onChange={(e) => setOptions({ ...options, include_transcript: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-                />
-                <span className="text-sm text-slate-700">原始转写文本 (.txt)</span>
-              </label>
-              <label className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 cursor-pointer hover:bg-gray-100">
-                <input
-                  type="checkbox"
-                  checked={options.include_extracted}
-                  onChange={(e) => setOptions({ ...options, include_extracted: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-                />
-                <span className="text-sm text-slate-700">结构化提取信息 (.json)</span>
-              </label>
-              <label className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 cursor-pointer hover:bg-gray-100">
-                <input
-                  type="checkbox"
-                  checked={options.include_final}
-                  onChange={(e) => setOptions({ ...options, include_final: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-                />
-                <span className="text-sm text-slate-700">最终完善内容 (.md)</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Naming Pattern */}
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2 font-body">
-              文件命名规则
-            </label>
-            <input
-              type="text"
-              value={options.naming_pattern}
-              onChange={(e) => setOptions({ ...options, naming_pattern: e.target.value })}
-              placeholder="{project}_{session}_{date}_{type}"
-              className="w-full px-4 py-2.5 rounded-xl bg-gray-100 text-slate-700 font-body text-sm
-                         shadow-[inset_3px_3px_8px_rgba(0,0,0,0.06)]
-                         focus:outline-none focus:ring-2 focus:ring-blue-400
-                         placeholder:text-slate-400"
-            />
-            <p className="mt-1 text-xs text-slate-400">
-              可用变量: {'{project}'}, {'{session}'}, {'{date}'}, {'{type}'}
-            </p>
-          </div>
+        {/* Export Info */}
+        <div className="mb-4 p-4 rounded-xl bg-blue-50 text-sm text-slate-600">
+          <p className="font-medium mb-2">将导出以下内容：</p>
+          <ul className="list-disc list-inside space-y-1 text-slate-500">
+            <li>提取信息 (extracted.md)</li>
+            <li>最终内容 (final.md)</li>
+          </ul>
         </div>
 
         {/* Error */}
@@ -269,14 +156,14 @@ export function ExportPanel({ project, sessions, onClose }: ExportPanelProps) {
           </button>
           <button
             onClick={handleExport}
-            disabled={exporting || sessions.length === 0}
+            disabled={exporting || validSessions.length === 0}
             className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-white
                        bg-gradient-to-r from-blue-500 to-blue-600
                        shadow-[0_4px_12px_rgba(59,130,246,0.3)]
                        disabled:opacity-50 disabled:cursor-not-allowed
                        cursor-pointer transition-all"
           >
-            {exporting ? '导出中...' : `导出 ${sessions.length} 个访谈`}
+            {exporting ? '导出中...' : `导出 ${validSessions.length} 个访谈`}
           </button>
         </div>
       </div>
