@@ -52,7 +52,7 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
           break;
         case 'extracted':
           blob = await exportSessionExtracted(session.id);
-          filename = `${session.filename}_extracted.json`;
+          filename = `${session.filename}_extracted.md`;
           break;
         case 'final':
           blob = await exportSessionFinal(session.id);
@@ -162,21 +162,17 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
                         shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04),inset_-3px_-3px_8px_rgba(255,255,255,0.7)]">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium text-slate-700 font-heading">提取信息</h3>
-            {Object.keys(session.extracted_info || {}).length > 0 && (
+            {session.extracted_info && (
               <button
-                onClick={() => copyToClipboard(JSON.stringify(session.extracted_info, null, 2))}
+                onClick={() => copyToClipboard(session.extracted_info)}
                 className="text-xs text-blue-500 hover:text-blue-600 cursor-pointer"
               >
                 复制
               </button>
             )}
           </div>
-          <div className="h-96 overflow-y-auto text-sm text-slate-600 font-body">
-            {Object.keys(session.extracted_info || {}).length > 0 ? (
-              <pre className="whitespace-pre-wrap">
-                {JSON.stringify(session.extracted_info, null, 2)}
-              </pre>
-            ) : (
+          <div className="h-96 overflow-y-auto text-sm text-slate-600 font-body whitespace-pre-wrap">
+            {session.extracted_info || (
               <span className="text-slate-400">暂无提取信息</span>
             )}
           </div>

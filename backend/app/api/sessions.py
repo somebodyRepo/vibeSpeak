@@ -140,9 +140,9 @@ async def create_session(
         duration_s=session.duration_s,
         status=session.status,
         raw_transcript=session.raw_transcript,
-        extracted_info=json.loads(session.extracted_info) if session.extracted_info else {},
-        supplementary_info=session.supplementary_info,
-        final_content=session.final_content,
+        extracted_info=session.extracted_info or "",
+        supplementary_info=session.supplementary_info or "",
+        final_content=session.final_content or "",
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -252,9 +252,9 @@ async def list_sessions(
                 duration_s=s.duration_s,
                 status=s.status,
                 raw_transcript=s.raw_transcript,
-                extracted_info=json.loads(s.extracted_info) if s.extracted_info else {},
-                supplementary_info=s.supplementary_info,
-                final_content=s.final_content,
+                extracted_info=s.extracted_info or "",
+                supplementary_info=s.supplementary_info or "",
+                final_content=s.final_content or "",
                 created_at=s.created_at,
                 updated_at=s.updated_at,
             )
@@ -286,9 +286,9 @@ async def get_session(
         duration_s=session.duration_s,
         status=session.status,
         raw_transcript=session.raw_transcript,
-        extracted_info=json.loads(session.extracted_info) if session.extracted_info else {},
-        supplementary_info=session.supplementary_info,
-        final_content=session.final_content,
+        extracted_info=session.extracted_info or "",
+        supplementary_info=session.supplementary_info or "",
+        final_content=session.final_content or "",
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -329,9 +329,9 @@ async def update_session(
         duration_s=session.duration_s,
         status=session.status,
         raw_transcript=session.raw_transcript,
-        extracted_info=json.loads(session.extracted_info) if session.extracted_info else {},
-        supplementary_info=session.supplementary_info,
-        final_content=session.final_content,
+        extracted_info=session.extracted_info or "",
+        supplementary_info=session.supplementary_info or "",
+        final_content=session.final_content or "",
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -410,13 +410,13 @@ async def process_session_pipeline(session_id: str):
                     await db.commit()
 
                     outline_content = OutlineContent.model_validate_json(outline_db.content)
-                    # 在线程池中执行阻塞的 LLM 操作
-                    extracted = await asyncio.to_thread(
+                    # 在线程池中执行阻塞的 LLM 操作，返回 Markdown
+                    extracted_markdown = await asyncio.to_thread(
                         llm_service.extract_info_by_outline_sync,
                         raw_text,
                         outline_content.model_dump(),
                     )
-                    session.extracted_info = json.dumps(extracted, ensure_ascii=False)
+                    session.extracted_info = extracted_markdown
                     await db.commit()
                     print(f"[Pipeline] Extraction done")
 
@@ -425,15 +425,15 @@ async def process_session_pipeline(session_id: str):
                     session.status = "validating"
                     await db.commit()
 
-                    validation_result = await asyncio.to_thread(
+                    supplementary_markdown = await asyncio.to_thread(
                         llm_service.validate_extraction_sync,
                         raw_text,
-                        extracted,
+                        extracted_markdown,
                         outline_content.model_dump(),
                     )
 
-                    if validation_result.get("missing_info"):
-                        session.supplementary_info = validation_result.get("missing_info", "")
+                    if supplementary_markdown:
+                        session.supplementary_info = supplementary_markdown
 
                     await db.commit()
                     print(f"[Pipeline] Validation done")
@@ -442,7 +442,7 @@ async def process_session_pipeline(session_id: str):
                     print(f"[Pipeline] Step 4: Generating final content...")
                     final_content = await asyncio.to_thread(
                         llm_service.generate_final_content_sync,
-                        extracted,
+                        extracted_markdown,
                         session.supplementary_info or "",
                     )
                     session.final_content = final_content
@@ -528,7 +528,7 @@ async def extract_session_info(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """根据提纲提取信息"""
+    """根据提纲提取信息，返回 Markdown"""
     result = await db.execute(
         select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
     )
@@ -565,20 +565,20 @@ async def extract_session_info(
     await db.commit()
 
     try:
-        # 调用 LLM 提取信息
-        extracted = await llm_service.extract_info_by_outline(
+        # 调用 LLM 提取信息，返回 Markdown
+        extracted_markdown = await llm_service.extract_info_by_outline(
             transcript=session.raw_transcript,
             outline=outline_content.model_dump(),
         )
 
-        session.extracted_info = json.dumps(extracted, ensure_ascii=False)
+        session.extracted_info = extracted_markdown
         session.status = "done"
         await db.commit()
 
         return {
             "success": True,
             "message": "Information extracted",
-            "extracted_info": extracted,
+            "extracted_info": extracted_markdown,
         }
 
     except Exception as e:
@@ -592,7 +592,7 @@ async def validate_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """验证提取信息，找出遗漏内容"""
+    """验证提取信息，找出遗漏内容，返回 Markdown"""
     result = await db.execute(
         select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
     )
@@ -622,16 +622,16 @@ async def validate_session(
     await db.commit()
 
     try:
-        # 调用 LLM 验证
-        validation_result = await llm_service.validate_extraction(
+        # 调用 LLM 验证，返回 Markdown
+        supplementary_markdown = await llm_service.validate_extraction(
             transcript=session.raw_transcript,
-            extracted_info=json.loads(session.extracted_info),
+            extracted_markdown=session.extracted_info,
             outline=outline_content.model_dump(),
         )
 
-        # 将遗漏内容添加到补充信息
-        if validation_result.get("missing_info"):
-            session.supplementary_info = validation_result.get("missing_info", "")
+        # 将补充信息保存
+        if supplementary_markdown:
+            session.supplementary_info = supplementary_markdown
 
         session.status = "done"
         await db.commit()
@@ -639,8 +639,7 @@ async def validate_session(
         return {
             "success": True,
             "message": "Validation completed",
-            "missing_info": validation_result.get("missing_info", ""),
-            "suggestions": validation_result.get("suggestions", []),
+            "supplementary_info": supplementary_markdown,
         }
 
     except Exception as e:
@@ -669,7 +668,7 @@ async def finalize_session(
     try:
         # 调用 LLM 生成最终内容
         final_content = await llm_service.generate_final_content(
-            extracted_info=json.loads(session.extracted_info),
+            extracted_markdown=session.extracted_info,
             supplementary_info=session.supplementary_info or "",
         )
 
@@ -747,7 +746,7 @@ async def export_extracted(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """导出提取信息"""
+    """导出提取信息（Markdown 格式）"""
     result = await db.execute(
         select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
     )
@@ -761,9 +760,9 @@ async def export_extracted(
 
     return StreamingResponse(
         iter([session.extracted_info.encode()]),
-        media_type="application/json",
+        media_type="text/markdown",
         headers={
-            "Content-Disposition": f"attachment; filename={session.filename}_extracted.json"
+            "Content-Disposition": f"attachment; filename={session.filename}_extracted.md"
         }
     )
 

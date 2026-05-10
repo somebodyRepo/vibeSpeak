@@ -100,9 +100,9 @@ export interface InterviewSession {
   duration_s: number;
   status: 'pending' | 'transcribing' | 'extracting' | 'validating' | 'done' | 'error';
   raw_transcript: string;
-  extracted_info: Record<string, unknown>;
-  supplementary_info: string;
-  final_content: string;
+  extracted_info: string;  // Markdown 格式
+  supplementary_info: string;  // Markdown 格式
+  final_content: string;  // Markdown 格式
   created_at: string;
   updated_at: string;
 }
@@ -120,7 +120,7 @@ export interface ExportOptions {
   include_final: boolean;
   audio_format: 'wav' | 'mp3';
   transcript_format: 'txt' | 'json';
-  extracted_format: 'json' | 'md';
+  extracted_format: 'md' | 'txt';  // 改为 md 默认
   final_format: 'md' | 'txt';
   naming_pattern: string;
 }

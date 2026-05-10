@@ -234,9 +234,9 @@ class SessionResponse(BaseModel):
     duration_s: float
     status: str
     raw_transcript: str
-    extracted_info: dict[str, Any] = Field(default_factory=dict)
-    supplementary_info: str
-    final_content: str
+    extracted_info: str = ""  # Markdown 格式
+    supplementary_info: str = ""  # Markdown 格式
+    final_content: str = ""  # Markdown 格式
     created_at: datetime
     updated_at: datetime
 

@@ -94,7 +94,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
   const getProgressSteps = (session: InterviewSession) => {
     const steps = [
       { key: 'transcribe', label: '转写', done: !!session.raw_transcript },
-      { key: 'extract', label: '提取', done: Object.keys(session.extracted_info || {}).length > 0 },
+      { key: 'extract', label: '提取', done: !!session.extracted_info },
       { key: 'validate', label: '验证', done: !!session.supplementary_info },
       { key: 'finalize', label: '完成', done: !!session.final_content },
     ];

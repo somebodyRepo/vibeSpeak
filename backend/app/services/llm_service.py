@@ -230,21 +230,17 @@ class LLMService:
 1. 严格按照提纲板块和问题进行提取
 2. 如果某个问题在文本中没有相关信息，标记为"未提及"
 3. 提取的信息要准确、简洁，保留关键细节
-4. 如果有超出提纲但有价值的信息，放入"补充信息"字段
+4. 如果有超出提纲但有价值的信息，放入"补充信息"板块
 
 ## 输出格式
-请以 JSON 格式输出，结构如下：
-{
-  "sections": [
-    {
-      "title": "板块标题",
-      "items": [
-        {"question": "问题", "answer": "提取的答案或'未提及'"}
-      ]
-    }
-  ],
-  "additional_info": "超出提纲但有价值的信息"
-}
+请以 Markdown 格式输出，按板块组织，每个问题用加粗显示，答案跟在后面。示例：
+
+## 板块标题
+**问题1**: 答案内容
+**问题2**: 答案内容
+
+## 补充信息
+超出提纲但有价值的信息
 """
 
     VALIDATE_EXTRACTION_PROMPT = """你是专业的调研访谈质量审核专家。请对以下提取结果进行验证，找出可能遗漏的重要信息。
@@ -252,8 +248,8 @@ class LLMService:
 ## 原始转写文本
 {transcript}
 
-## 已提取的结构化信息
-{extracted_json}
+## 已提取的信息
+{extracted_markdown}
 
 ## 提纲结构
 {outline_json}
@@ -262,46 +258,48 @@ class LLMService:
 1. 仔细对比转写文本和提取结果
 2. 找出可能被遗漏的重要信息（特别是数字、名称、时间等关键要素）
 3. 判断提取的准确性
-4. 提出改进建议
+4. 整理成补充信息
 
 ## 输出格式
-请以 JSON 格式输出：
-{
-  "missing_info": "遗漏的重要信息（整理后的文本）",
-  "suggestions": ["改进建议列表"],
-  "accuracy_score": 0-100的准确性评分,
-  "needs_review": true/false
-}
+请以 Markdown 格式输出补充遗漏的信息，直接列出遗漏的内容，格式如下：
+
+## 遗漏信息
+- 遗漏点1
+- 遗漏点2
+
+如果没有遗漏重要信息，输出：
+## 无遗漏
+提取结果完整准确。
 """
 
     FINAL_CONTENT_PROMPT = """你是专业的调研报告撰写专家。请将以下信息整合成一份完整的调研记录。
 
-## 结构化提取信息
-{extracted_json}
+## 提取信息
+{extracted_markdown}
 
-## 补充遗漏信息
+## 补充信息
 {supplementary_info}
 
 ## 要求
 1. 按板块组织内容，结构清晰
 2. 信息完整准确，包含补充内容
 3. 使用规范的书面表达
-4. 格式为 Markdown
+4. 保持 Markdown 格式
 
 ## 输出格式
-请以 Markdown 格式输出完整的调研记录。
+请以 Markdown 格式输出完整的调研记录，包含标题和各板块内容。
 """
 
     async def extract_info_by_outline(
         self,
         transcript: str,
         outline: dict,
-    ) -> dict:
-        """根据提纲从转写文本中提取结构化信息"""
+    ) -> str:
+        """根据提纲从转写文本中提取关键信息，返回 Markdown 格式"""
         await self.initialize()
 
         if not self.client:
-            return {"sections": [], "additional_info": ""}
+            return ""
 
         outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
         system_prompt = self.EXTRACT_INFO_PROMPT.format(outline_json=outline_json)
@@ -315,41 +313,28 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            result_text = response.choices[0].message.content
-
-            # 尝试解析 JSON
-            try:
-                # 去除可能的 markdown 代码块标记
-                if result_text.startswith("```"):
-                    result_text = result_text.split("```")[1]
-                    if result_text.startswith("json"):
-                        result_text = result_text[4:]
-                result = json.loads(result_text.strip())
-                return result
-            except json.JSONDecodeError:
-                return {"sections": [], "additional_info": result_text}
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Extract info error: {e}")
-            return {"sections": [], "additional_info": ""}
+            return ""
 
     async def validate_extraction(
         self,
         transcript: str,
-        extracted_info: dict,
+        extracted_markdown: str,
         outline: dict,
-    ) -> dict:
-        """验证提取信息，找出遗漏内容"""
+    ) -> str:
+        """验证提取信息，找出遗漏内容，返回 Markdown 格式"""
         await self.initialize()
 
         if not self.client:
-            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+            return ""
 
-        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
         outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
         system_prompt = self.VALIDATE_EXTRACTION_PROMPT.format(
             transcript=transcript,
-            extracted_json=extracted_json,
+            extracted_markdown=extracted_markdown,
             outline_json=outline_json,
         )
 
@@ -362,42 +347,25 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            result_text = response.choices[0].message.content
-
-            # 尝试解析 JSON
-            try:
-                if result_text.startswith("```"):
-                    result_text = result_text.split("```")[1]
-                    if result_text.startswith("json"):
-                        result_text = result_text[4:]
-                result = json.loads(result_text.strip())
-                return result
-            except json.JSONDecodeError:
-                return {
-                    "missing_info": result_text,
-                    "suggestions": [],
-                    "accuracy_score": 0,
-                    "needs_review": True
-                }
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Validate extraction error: {e}")
-            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+            return ""
 
     async def generate_final_content(
         self,
-        extracted_info: dict,
+        extracted_markdown: str,
         supplementary_info: str,
     ) -> str:
-        """生成最终完善的访谈内容"""
+        """生成最终完善的访谈内容，返回 Markdown 格式"""
         await self.initialize()
 
         if not self.client:
             return ""
 
-        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
         system_prompt = self.FINAL_CONTENT_PROMPT.format(
-            extracted_json=extracted_json,
+            extracted_markdown=extracted_markdown,
             supplementary_info=supplementary_info,
         )
 
@@ -410,7 +378,7 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Generate final content error: {e}")
@@ -427,10 +395,10 @@ class LLMService:
         self,
         transcript: str,
         outline: dict,
-    ) -> dict:
-        """根据提纲从转写文本中提取结构化信息（同步版本）"""
+    ) -> str:
+        """根据提纲从转写文本中提取关键信息（同步版本），返回 Markdown 格式"""
         if not self._ensure_sync_client():
-            return {"sections": [], "additional_info": ""}
+            return ""
 
         outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
         system_prompt = self.EXTRACT_INFO_PROMPT.format(outline_json=outline_json)
@@ -444,38 +412,26 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            result_text = response.choices[0].message.content
-
-            # 尝试解析 JSON
-            try:
-                if result_text.startswith("```"):
-                    result_text = result_text.split("```")[1]
-                    if result_text.startswith("json"):
-                        result_text = result_text[4:]
-                result = json.loads(result_text.strip())
-                return result
-            except json.JSONDecodeError:
-                return {"sections": [], "additional_info": result_text}
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Extract info sync error: {e}")
-            return {"sections": [], "additional_info": ""}
+            return ""
 
     def validate_extraction_sync(
         self,
         transcript: str,
-        extracted_info: dict,
+        extracted_markdown: str,
         outline: dict,
-    ) -> dict:
-        """验证提取信息，找出遗漏内容（同步版本）"""
+    ) -> str:
+        """验证提取信息，找出遗漏内容（同步版本），返回 Markdown 格式"""
         if not self._ensure_sync_client():
-            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+            return ""
 
-        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
         outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
         system_prompt = self.VALIDATE_EXTRACTION_PROMPT.format(
             transcript=transcript,
-            extracted_json=extracted_json,
+            extracted_markdown=extracted_markdown,
             outline_json=outline_json,
         )
 
@@ -488,39 +444,23 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            result_text = response.choices[0].message.content
-
-            try:
-                if result_text.startswith("```"):
-                    result_text = result_text.split("```")[1]
-                    if result_text.startswith("json"):
-                        result_text = result_text[4:]
-                result = json.loads(result_text.strip())
-                return result
-            except json.JSONDecodeError:
-                return {
-                    "missing_info": result_text,
-                    "suggestions": [],
-                    "accuracy_score": 0,
-                    "needs_review": True
-                }
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Validate extraction sync error: {e}")
-            return {"missing_info": "", "suggestions": [], "accuracy_score": 0, "needs_review": True}
+            return ""
 
     def generate_final_content_sync(
         self,
-        extracted_info: dict,
+        extracted_markdown: str,
         supplementary_info: str,
     ) -> str:
-        """生成最终完善的访谈内容（同步版本）"""
+        """生成最终完善的访谈内容（同步版本），返回 Markdown 格式"""
         if not self._ensure_sync_client():
             return ""
 
-        extracted_json = json.dumps(extracted_info, ensure_ascii=False, indent=2)
         system_prompt = self.FINAL_CONTENT_PROMPT.format(
-            extracted_json=extracted_json,
+            extracted_markdown=extracted_markdown,
             supplementary_info=supplementary_info,
         )
 
@@ -533,7 +473,7 @@ class LLMService:
                 ],
                 temperature=0.3,
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content or ""
 
         except Exception as e:
             print(f"Generate final content sync error: {e}")
