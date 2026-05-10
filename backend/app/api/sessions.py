@@ -5,6 +5,7 @@ import zipfile
 import io
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -706,11 +707,15 @@ async def export_audio(
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
+    # RFC 5987 encoding for non-ASCII filenames
+    filename = f"{session.filename}.wav"
+    encoded_filename = quote(filename)
+
     return StreamingResponse(
         open(audio_path, "rb"),
         media_type="audio/wav",
         headers={
-            "Content-Disposition": f"attachment; filename={session.filename}.wav"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
 
@@ -732,11 +737,15 @@ async def export_transcript(
     if not session.raw_transcript:
         raise HTTPException(status_code=400, detail="No transcript available")
 
+    # RFC 5987 encoding for non-ASCII filenames
+    filename = f"{session.filename}_transcript.txt"
+    encoded_filename = quote(filename)
+
     return StreamingResponse(
         iter([session.raw_transcript.encode()]),
         media_type="text/plain",
         headers={
-            "Content-Disposition": f"attachment; filename={session.filename}_transcript.txt"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
 
@@ -758,11 +767,15 @@ async def export_extracted(
     if not session.extracted_info:
         raise HTTPException(status_code=400, detail="No extracted info available")
 
+    # RFC 5987 encoding for non-ASCII filenames
+    filename = f"{session.filename}_extracted.md"
+    encoded_filename = quote(filename)
+
     return StreamingResponse(
         iter([session.extracted_info.encode()]),
         media_type="text/markdown",
         headers={
-            "Content-Disposition": f"attachment; filename={session.filename}_extracted.md"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
 
@@ -784,10 +797,14 @@ async def export_final(
     if not session.final_content:
         raise HTTPException(status_code=400, detail="No final content available")
 
+    # RFC 5987 encoding for non-ASCII filenames
+    filename = f"{session.filename}_final.md"
+    encoded_filename = quote(filename)
+
     return StreamingResponse(
         iter([session.final_content.encode()]),
         media_type="text/markdown",
         headers={
-            "Content-Disposition": f"attachment; filename={session.filename}_final.md"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
