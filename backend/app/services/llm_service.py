@@ -62,6 +62,7 @@ class LLMService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._sync_initialized = False
         return cls._instance
 
     def __init__(self):
@@ -77,14 +78,14 @@ class LLMService:
             self._sync_lock = threading.Lock()
 
         with self._sync_lock:
-            if self._initialized:
+            if self._sync_initialized:
                 return
 
             if settings.llm_base_url and settings.llm_api_key:
                 self._sync_client = OpenAI(
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
-                    timeout=60.0,
+                    timeout=120.0,  # 增加超时时间
                     max_retries=2,
                 )
                 self.model = settings.llm_model
@@ -92,7 +93,7 @@ class LLMService:
                 self._sync_client = None
                 self.model = None
 
-            self._initialized = True
+            self._sync_initialized = True
             print("LLM service initialized (sync)")
 
     async def initialize(self):
@@ -108,7 +109,7 @@ class LLMService:
                 self.client = AsyncOpenAI(
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
-                    timeout=60.0,
+                    timeout=120.0,  # 增加超时时间
                     max_retries=2,
                 )
                 self.model = settings.llm_model
