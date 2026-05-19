@@ -3,7 +3,7 @@ import { NavBar } from './NavBar';
 import { ProjectList } from '../projects/ProjectList';
 import { ProjectEditor } from '../projects/ProjectEditor';
 import { ProjectWithOutlineCreator } from '../projects/ProjectWithOutlineCreator';
-import { SessionList } from '../sessions/SessionList';
+import { ProjectDetailTabs } from '../projects/ProjectDetailTabs';
 import { SessionViewer } from '../sessions/SessionViewer';
 import { SessionImporter } from '../sessions/SessionImporter';
 import { SessionRecorder } from '../sessions/SessionRecorder';
@@ -52,6 +52,10 @@ export function AppShell() {
   const handleSaveProject = (project: Project) => {
     setSelectedProject(project);
     setView('project-detail');
+  };
+
+  const handleProjectUpdate = (project: Project) => {
+    setSelectedProject(project);
   };
 
   const handleImportAudio = () => {
@@ -115,77 +119,18 @@ export function AppShell() {
             )}
 
             {view === 'project-detail' && selectedProject && (
-              <div className="space-y-6">
-                {/* Project Header */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={handleBackToProjects}
-                      className="p-2 rounded-lg text-slate-500 hover:bg-gray-100 cursor-pointer"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <div>
-                      <h1 className="text-xl font-heading font-semibold text-slate-800">
-                        {selectedProject.name}
-                      </h1>
-                      <p className="text-sm text-slate-500">
-                        {selectedProject.description || '暂无描述'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleOpenExport}
-                      className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
-                                 bg-gray-100 hover:bg-gray-200 cursor-pointer"
-                    >
-                      批量导出
-                    </button>
-                    <button
-                      onClick={handleEditProject}
-                      className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600
-                                 bg-gray-100 hover:bg-gray-200 cursor-pointer"
-                    >
-                      编辑项目
-                    </button>
-                  </div>
-                </div>
-
-                {/* Outline Preview */}
-                {selectedProject.outline && (
-                  <div className="p-4 rounded-2xl bg-gray-100
-                                  shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04)]">
-                    <h3 className="font-medium text-slate-700 mb-2 font-heading">
-                      关联提纲: {selectedProject.outline.name}
-                    </h3>
-                    <div className="text-sm text-slate-600 space-y-2">
-                      {selectedProject.outline.content.sections.map(section => (
-                        <div key={section.id}>
-                          <span className="font-medium">{section.title}</span>
-                          <ul className="ml-4 text-slate-500">
-                            {section.questions.map((q, i) => (
-                              <li key={i}>• {q}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Session List */}
-                <SessionList
-                  project={selectedProject}
-                  onSelect={handleSelectSession}
-                  onImport={handleImportAudio}
-                  onRecord={handleStartRecording}
-                  onSessionsLoad={setSessions}
-                  refreshKey={refreshKey}
-                />
-              </div>
+              <ProjectDetailTabs
+                project={selectedProject}
+                onSelectSession={handleSelectSession}
+                onImportAudio={handleImportAudio}
+                onStartRecording={handleStartRecording}
+                onSessionsLoad={setSessions}
+                onEditProject={handleEditProject}
+                onOpenExport={handleOpenExport}
+                onBack={handleBackToProjects}
+                refreshKey={refreshKey}
+                onProjectUpdate={handleProjectUpdate}
+              />
             )}
 
             {view === 'recording' && selectedProject && (

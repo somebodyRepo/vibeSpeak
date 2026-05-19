@@ -75,6 +75,8 @@ export interface Project {
   description: string;
   outline_id?: string;
   outline?: Outline;
+  table_structure_prompt: string;
+  summary_table: string;
   session_count: number;
   created_at: string;
   updated_at: string;
@@ -98,11 +100,12 @@ export interface InterviewSession {
   filename: string;
   audio_path: string;
   duration_s: number;
-  status: 'pending' | 'transcribing' | 'extracting' | 'validating' | 'done' | 'error';
+  status: 'pending' | 'transcribing' | 'extracting' | 'validating' | 'tabled' | 'done' | 'error';
   raw_transcript: string;
   extracted_info: string;  // Markdown 格式
   supplementary_info: string;  // Markdown 格式
   final_content: string;  // Markdown 格式
+  table_content: string;  // JSON 格式单访谈表格数据
   created_at: string;
   updated_at: string;
 }

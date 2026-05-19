@@ -3,10 +3,12 @@ import re
 import zipfile
 import io
 from datetime import datetime
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -58,6 +60,8 @@ async def create_project(
         name=project.name,
         description=project.description,
         outline_id=project.outline_id,
+        table_structure_prompt=project.table_structure_prompt or "",
+        summary_table=project.summary_table or "",
         session_count=0,
         created_at=project.created_at,
         updated_at=project.updated_at,
@@ -120,6 +124,8 @@ async def list_projects(
             name=project.name,
             description=project.description,
             outline_id=project.outline_id,
+            table_structure_prompt=project.table_structure_prompt or "",
+            summary_table=project.summary_table or "",
             outline=outline,
             session_count=session_count,
             created_at=project.created_at,
@@ -171,6 +177,8 @@ async def get_project(
         name=project.name,
         description=project.description,
         outline_id=project.outline_id,
+        table_structure_prompt=project.table_structure_prompt or "",
+        summary_table=project.summary_table or "",
         outline=outline,
         session_count=session_count,
         created_at=project.created_at,
@@ -240,6 +248,8 @@ async def update_project(
         name=project.name,
         description=project.description,
         outline_id=project.outline_id,
+        table_structure_prompt=project.table_structure_prompt or "",
+        summary_table=project.summary_table or "",
         outline=outline,
         session_count=session_count,
         created_at=project.created_at,
@@ -273,6 +283,413 @@ async def delete_project(
     await db.commit()
 
     return {"success": True, "message": "Project and related sessions deleted"}
+
+
+# ===== 表格结构提示词 API =====
+
+
+@router.post("/{project_id}/design-table-structure")
+async def design_table_structure(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """触发 LLM 生成表格结构提示词"""
+    from app.services.llm_service import llm_service
+
+    # 获取项目
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 检查是否有提纲
+    if not project.outline_id:
+        raise HTTPException(status_code=400, detail="项目无关联提纲，无法设计表格结构")
+
+    # 获取提纲
+    outline_result = await db.execute(
+        select(OutlineDB).where(OutlineDB.id == project.outline_id)
+    )
+    outline_db = outline_result.scalar_one_or_none()
+
+    if not outline_db:
+        raise HTTPException(status_code=400, detail="提纲不存在")
+
+    # 获取已完成的访谈（status='done'）
+    session_result = await db.execute(
+        select(InterviewSessionDB)
+        .where(InterviewSessionDB.project_id == project_id)
+        .where(InterviewSessionDB.status == "done")
+        .where(InterviewSessionDB.final_content != "")
+    )
+    sessions = session_result.scalars().all()
+
+    if not sessions:
+        raise HTTPException(status_code=400, detail="无已完成的访谈内容，无法设计表格结构")
+
+    # 解析提纲
+    outline_content = OutlineContent.model_validate_json(outline_db.content)
+
+    # 收集访谈内容
+    final_contents = [s.final_content for s in sessions if s.final_content]
+
+    # 调用 LLM 设计提示词
+    prompt = await llm_service.design_table_structure_prompt(
+        outline=outline_content.model_dump(),
+        final_contents=final_contents,
+    )
+
+    return {
+        "success": True,
+        "prompt": prompt,
+        "message": "表格结构提示词生成成功",
+    }
+
+
+class TableStructureUpdate(BaseModel):
+    prompt: str
+
+
+@router.put("/{project_id}/table-structure")
+async def update_table_structure(
+    project_id: str,
+    request: TableStructureUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """保存表格结构提示词"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project.table_structure_prompt = request.prompt
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "表格结构提示词保存成功",
+    }
+
+
+@router.get("/{project_id}/table-structure")
+async def get_table_structure(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取当前保存的表格结构提示词"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return {
+        "success": True,
+        "prompt": project.table_structure_prompt or "",
+        "has_outline": bool(project.outline_id),
+    }
+
+
+# ===== 批量表格生成 API =====
+
+
+@router.post("/{project_id}/generate-all-tables")
+async def generate_all_tables(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """触发批量生成所有访谈表格"""
+    from app.services.batch_table_service import batch_table_service
+
+    # 获取项目
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.table_structure_prompt:
+        raise HTTPException(status_code=400, detail="项目未设置表格结构提示词，请先设计表格结构")
+
+    # 获取需要生成表格的会话（done状态且未生成表格）
+    session_result = await db.execute(
+        select(InterviewSessionDB)
+        .where(InterviewSessionDB.project_id == project_id)
+        .where(InterviewSessionDB.status == "done")
+        .where(InterviewSessionDB.final_content != "")
+        .where(InterviewSessionDB.table_content == "")
+    )
+    sessions = session_result.scalars().all()
+
+    if not sessions:
+        return {
+            "success": True,
+            "message": "没有需要生成表格的会话",
+            "total_count": 0,
+            "pending_count": 0,
+        }
+
+    # 准备会话内容
+    session_contents = {s.id: s.final_content for s in sessions}
+    session_ids = [s.id for s in sessions]
+
+    # 启动批量生成
+    progress = batch_table_service.start_batch_generation(
+        project_id=project_id,
+        session_ids=session_ids,
+        table_structure_prompt=project.table_structure_prompt,
+        session_contents=session_contents,
+    )
+
+    return {
+        "success": True,
+        "message": f"开始批量生成 {len(sessions)} 个表格",
+        "total_count": progress.total_count,
+        "pending_count": progress.total_count - progress.completed_count - progress.error_count,
+    }
+
+
+@router.get("/{project_id}/table-generation-progress")
+async def get_table_generation_progress(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取批量表格生成进度"""
+    from app.services.batch_table_service import batch_table_service
+
+    # 验证项目存在
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    progress = batch_table_service.get_progress(project_id)
+
+    if not progress:
+        # 返回默认进度
+        return {
+            "success": True,
+            "is_running": False,
+            "total_count": 0,
+            "completed_count": 0,
+            "error_count": 0,
+            "tasks": [],
+        }
+
+    # 构建任务状态列表
+    tasks = []
+    for session_id, task in progress.tasks.items():
+        tasks.append({
+            "session_id": session_id,
+            "status": task.status,
+            "error_message": task.error_message,
+            "retry_count": task.retry_count,
+        })
+
+    return {
+        "success": True,
+        "is_running": progress.is_running,
+        "total_count": progress.total_count,
+        "completed_count": progress.completed_count,
+        "error_count": progress.error_count,
+        "tasks": tasks,
+    }
+
+
+# ===== 表格整合汇总 API =====
+
+
+@router.post("/{project_id}/summarize-tables")
+async def summarize_tables(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """触发整合所有已生成表格的会话，生成汇总表格"""
+    from app.services.llm_service import llm_service
+
+    # 获取项目
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.table_structure_prompt:
+        raise HTTPException(status_code=400, detail="项目未设置表格结构提示词")
+
+    # 获取所有 tabled 状态的会话
+    session_result = await db.execute(
+        select(InterviewSessionDB)
+        .where(InterviewSessionDB.project_id == project_id)
+        .where(InterviewSessionDB.status == "tabled")
+        .where(InterviewSessionDB.table_content != "")
+    )
+    sessions = session_result.scalars().all()
+
+    if not sessions:
+        raise HTTPException(status_code=400, detail="没有已生成表格的会话，请先生成表格")
+
+    # 解析各会话的表格数据
+    session_tables = []
+    for session in sessions:
+        try:
+            table_data = json.loads(session.table_content)
+            session_tables.append(table_data)
+        except json.JSONDecodeError:
+            continue
+
+    if not session_tables:
+        raise HTTPException(status_code=400, detail="没有有效的表格数据")
+
+    # 调用 LLM 整合汇总
+    summary_markdown = await llm_service.summarize_tables(
+        table_structure_prompt=project.table_structure_prompt,
+        session_tables=session_tables,
+    )
+
+    # 保存汇总表格
+    project.summary_table = summary_markdown
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": f"成功整合 {len(sessions)} 个访谈的表格",
+        "summary_table": summary_markdown,
+        "session_count": len(sessions),
+    }
+
+
+@router.get("/{project_id}/summary-table")
+async def get_summary_table(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取项目的汇总表格"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return {
+        "success": True,
+        "summary_table": project.summary_table or "",
+        "has_prompt": bool(project.table_structure_prompt),
+    }
+
+
+@router.get("/{project_id}/export-summary")
+async def export_summary_table(
+    project_id: str,
+    format: str = "md",  # md or xlsx
+    db: AsyncSession = Depends(get_db),
+):
+    """导出汇总表格"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.summary_table:
+        raise HTTPException(status_code=400, detail="项目尚无汇总表格，请先整合汇总")
+
+    # Generate filename
+    date_str = datetime.now().strftime("%Y%m%d")
+    safe_name = re.sub(r'[^\w一-鿿]', '_', project.name)
+
+    if format == "xlsx":
+        # Generate Excel file
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        except ImportError:
+            raise HTTPException(status_code=500, detail="Excel export not available")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "汇总表格"
+
+        # Parse markdown table
+        lines = project.summary_table.split('\n')
+        table_lines = [l for l in lines if l.strip().startswith('|')]
+
+        if len(table_lines) < 2:
+            raise HTTPException(status_code=400, detail="无效的汇总表格格式")
+
+        # Parse header
+        header_cells = [c.strip() for c in table_lines[0].split('|') if c.strip()]
+        for i, cell in enumerate(header_cells):
+            ws.cell(row=1, column=i+1, value=cell)
+            ws.cell(row=1, column=i+1).font = Font(bold=True)
+            ws.cell(row=1, column=i+1).fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+
+        # Parse body (skip separator line)
+        for row_idx, line in enumerate(table_lines[2:], start=2):
+            cells = [c.strip() for c in line.split('|') if c.strip()]
+            for col_idx, cell in enumerate(cells, start=1):
+                ws.cell(row=row_idx, column=col_idx, value=cell)
+
+        # Auto-adjust column widths
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column].width = adjusted_width
+
+        # Save to bytes
+        from io import BytesIO
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        filename = f"{safe_name}_汇总_{date_str}.xlsx"
+        encoded_filename = quote(filename)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+    else:
+        # Export as Markdown
+        filename = f"{safe_name}_汇总_{date_str}.md"
+        encoded_filename = quote(filename)
+
+        return StreamingResponse(
+            iter([project.summary_table.encode()]),
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
+        )
 
 
 @router.get("/{project_id}/export")
@@ -471,6 +888,8 @@ async def import_project_with_outline(
         name=project.name,
         description=project.description,
         outline_id=project.outline_id,
+        table_structure_prompt=project.table_structure_prompt or "",
+        summary_table=project.summary_table or "",
         outline=OutlineResponse(
             id=outline.id,
             name=outline.name,

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSession, updateSession, exportSessionTranscript, exportSessionExtracted, exportSessionFinal } from '../../lib/api';
+import { SessionTableView } from './SessionTableView';
 import type { InterviewSession } from '../../types';
 
 interface SessionViewerProps {
@@ -251,6 +252,29 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
           </div>
         </div>
       </div>
+
+      {/* Table View Section */}
+      {session.table_content && (
+        <div className="p-4 rounded-2xl bg-gray-50
+                        shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04),inset_-3px_-3px_8px_rgba(255,255,255,0.7)]">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium text-slate-700 font-heading">表格数据</h3>
+            <button
+              onClick={() => copyToClipboard(session.table_content)}
+              className="text-xs text-blue-500 hover:text-blue-600 cursor-pointer"
+            >
+              复制 JSON
+            </button>
+          </div>
+          <SessionTableView
+            tableContent={session.table_content}
+            sessionId={session.id}
+            onUpdate={(newContent) => {
+              setSession(prev => prev ? { ...prev, table_content: newContent } : null);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listSessions, deleteSession } from '../../lib/api';
+import { listSessions, deleteSession, generateSessionTable } from '../../lib/api';
 import type { InterviewSession, Project } from '../../types';
 
 interface SessionListProps {
@@ -9,11 +9,13 @@ interface SessionListProps {
   onRecord?: () => void;
   onSessionsLoad?: (sessions: InterviewSession[]) => void;
   refreshKey?: number;
+  onGenerateTable?: () => void;
 }
 
-export function SessionList({ project, onSelect, onImport, onRecord, onSessionsLoad, refreshKey }: SessionListProps) {
+export function SessionList({ project, onSelect, onImport, onRecord, onSessionsLoad, refreshKey, onGenerateTable }: SessionListProps) {
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generatingTableId, setGeneratingTableId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
 
   const loadSessions = useCallback(async () => {
@@ -41,7 +43,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
       s => ['pending', 'transcribing', 'extracting', 'validating'].includes(s.status)
     );
 
-    if (hasProcessingSessions) {
+    if (hasProcessingSessions || generatingTableId) {
       // 每 3 秒轮询一次
       pollingRef.current = window.setInterval(() => {
         loadSessions();
@@ -54,7 +56,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
         pollingRef.current = null;
       }
     };
-  }, [sessions, loadSessions]);
+  }, [sessions, generatingTableId, loadSessions]);
 
   const handleDelete = async (sessionId: string, filename: string) => {
     if (!confirm(`确定要删除访谈 "${filename}" 吗？`)) return;
@@ -72,6 +74,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
       transcribing: 'bg-blue-100 text-blue-600 animate-pulse',
       extracting: 'bg-purple-100 text-purple-600 animate-pulse',
       validating: 'bg-yellow-100 text-yellow-600 animate-pulse',
+      tabled: 'bg-indigo-100 text-indigo-600',
       done: 'bg-green-100 text-green-600',
       error: 'bg-red-100 text-red-600',
     };
@@ -80,6 +83,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
       transcribing: '转写中',
       extracting: '提取中',
       validating: '验证中',
+      tabled: '已生成表格',
       done: '已完成',
       error: '出错',
     };
@@ -90,6 +94,24 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
     );
   };
 
+  const handleGenerateTable = async (sessionId: string) => {
+    if (!project.table_structure_prompt) {
+      alert('项目未设置表格结构提示词，请先在表格汇总中设计表格结构');
+      return;
+    }
+
+    setGeneratingTableId(sessionId);
+    try {
+      await generateSessionTable(sessionId);
+      await loadSessions();
+      onGenerateTable?.();
+    } catch (err) {
+      alert('生成表格失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    } finally {
+      setGeneratingTableId(null);
+    }
+  };
+
   // 获取处理进度指示器
   const getProgressSteps = (session: InterviewSession) => {
     const steps = [
@@ -97,6 +119,7 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
       { key: 'extract', label: '提取', done: !!session.extracted_info },
       { key: 'validate', label: '验证', done: !!session.supplementary_info },
       { key: 'finalize', label: '完成', done: !!session.final_content },
+      { key: 'table', label: '表格', done: !!session.table_content },
     ];
 
     const currentStepIndex = steps.findIndex(s => !s.done);
@@ -229,6 +252,27 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
                     {/* Processing spinner */}
                     {isProcessing && (
                       <div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                    )}
+
+                    {/* Generate Table button */}
+                    {session.status === 'done' && !session.table_content && (
+                      <button
+                        onClick={() => handleGenerateTable(session.id)}
+                        disabled={generatingTableId === session.id}
+                        className="px-2 py-1 rounded-lg text-xs font-medium text-indigo-600
+                                   bg-indigo-50 hover:bg-indigo-100
+                                   disabled:opacity-50 disabled:cursor-not-allowed
+                                   cursor-pointer transition-colors"
+                      >
+                        {generatingTableId === session.id ? '生成中...' : '生成表格'}
+                      </button>
+                    )}
+
+                    {/* Table generated indicator */}
+                    {session.status === 'tabled' && (
+                      <span className="px-2 py-1 rounded-lg text-xs font-medium text-indigo-600 bg-indigo-50">
+                        ✓ 表格
+                      </span>
                     )}
 
                     <button

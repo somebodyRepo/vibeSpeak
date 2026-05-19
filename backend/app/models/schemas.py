@@ -197,6 +197,8 @@ class ProjectResponse(BaseModel):
     description: str
     outline_id: Optional[str] = None
     outline: Optional[OutlineResponse] = None
+    table_structure_prompt: str = ""
+    summary_table: str = ""
     session_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -237,6 +239,7 @@ class SessionResponse(BaseModel):
     extracted_info: str = ""  # Markdown 格式
     supplementary_info: str = ""  # Markdown 格式
     final_content: str = ""  # Markdown 格式
+    table_content: str = ""  # JSON 格式单访谈表格数据
     created_at: datetime
     updated_at: datetime
 

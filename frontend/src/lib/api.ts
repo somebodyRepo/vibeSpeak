@@ -420,3 +420,133 @@ export async function exportSessionFinal(sessionId: string): Promise<Blob> {
   if (!response.ok) throw new Error('Failed to export final');
   return response.blob();
 }
+
+// ===== 表格结构提示词 API =====
+
+export async function designTableStructure(projectId: string): Promise<{ success: boolean; prompt: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/design-table-structure`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to design table structure');
+  }
+  return response.json();
+}
+
+export async function updateTableStructure(projectId: string, prompt: string): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/table-structure`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update table structure');
+  }
+  return response.json();
+}
+
+export async function getTableStructure(projectId: string): Promise<{ success: boolean; prompt: string; has_outline: boolean }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/table-structure`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get table structure');
+  }
+  return response.json();
+}
+
+// ===== 单访谈表格生成 API =====
+
+export async function generateSessionTable(sessionId: string): Promise<{ success: boolean; table_content: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/generate-table`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to generate session table');
+  }
+  return response.json();
+}
+
+export async function getSessionTable(sessionId: string): Promise<{ success: boolean; table_content: string; status: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/table`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get session table');
+  }
+  return response.json();
+}
+
+export async function updateSessionTable(sessionId: string, tableContent: string): Promise<{ success: boolean; table_content: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/sessions/${sessionId}/table`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table_content: tableContent }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update session table');
+  }
+  return response.json();
+}
+
+// ===== 批量表格生成 API =====
+
+export async function generateAllTables(projectId: string): Promise<{ success: boolean; total_count: number; pending_count: number }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/generate-all-tables`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to start batch generation');
+  }
+  return response.json();
+}
+
+export async function getTableGenerationProgress(projectId: string): Promise<{
+  success: boolean;
+  is_running: boolean;
+  total_count: number;
+  completed_count: number;
+  error_count: number;
+  tasks: Array<{ session_id: string; status: string; error_message: string; retry_count: number }>;
+}> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/table-generation-progress`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get progress');
+  }
+  return response.json();
+}
+
+// ===== 表格整合汇总 API =====
+
+export async function summarizeTables(projectId: string): Promise<{ success: boolean; summary_table: string; session_count: number }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/summarize-tables`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to summarize tables');
+  }
+  return response.json();
+}
+
+export async function getSummaryTable(projectId: string): Promise<{ success: boolean; summary_table: string; has_prompt: boolean }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/summary-table`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get summary table');
+  }
+  return response.json();
+}
+
+export async function exportSummaryTable(projectId: string, format: 'md' | 'xlsx'): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/export-summary?format=${format}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to export summary table');
+  }
+  return response.blob();
+}
