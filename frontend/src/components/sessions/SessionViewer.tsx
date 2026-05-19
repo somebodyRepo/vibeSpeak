@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getSession, updateSession, exportSessionTranscript, exportSessionExtracted, exportSessionFinal } from '../../lib/api';
-import { SessionTableView } from './SessionTableView';
+import { getSession, updateSession, exportSessionTranscript, exportSessionExtracted, exportSessionFinal, generateSessionTable, updateSessionTable } from '../../lib/api';
+import { MarkdownDocumentViewer } from './MarkdownDocumentViewer';
 import type { InterviewSession } from '../../types';
 
 interface SessionViewerProps {
@@ -13,6 +13,7 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
   const [loading, setLoading] = useState(true);
   const [editingSupplementary, setEditingSupplementary] = useState(false);
   const [supplementaryText, setSupplementaryText] = useState('');
+  const [isRegeneratingTable, setIsRegeneratingTable] = useState(false);
 
   const loadSession = useCallback(async () => {
     try {
@@ -36,6 +37,29 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
       await updateSession(session.id, { supplementary_info: supplementaryText });
       setSession(prev => prev ? { ...prev, supplementary_info: supplementaryText } : null);
       setEditingSupplementary(false);
+    } catch (err) {
+      alert('保存失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    }
+  };
+
+  const handleRegenerateTable = async () => {
+    if (!session) return;
+    setIsRegeneratingTable(true);
+    try {
+      const result = await generateSessionTable(session.id);
+      setSession(prev => prev ? { ...prev, table_content: result.table_content, status: 'tabled' } : null);
+    } catch (err) {
+      alert('生成文档失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    } finally {
+      setIsRegeneratingTable(false);
+    }
+  };
+
+  const handleSaveTableContent = async (newContent: string) => {
+    if (!session) return;
+    try {
+      await updateSessionTable(session.id, newContent);
+      setSession(prev => prev ? { ...prev, table_content: newContent } : null);
     } catch (err) {
       alert('保存失败: ' + (err instanceof Error ? err.message : '未知错误'));
     }
@@ -253,25 +277,26 @@ export function SessionViewer({ sessionId, onBack }: SessionViewerProps) {
         </div>
       </div>
 
-      {/* Table View Section */}
-      {session.table_content && (
+      {/* Table View Section - Markdown Document */}
+      {session.status === 'done' && (
         <div className="p-4 rounded-2xl bg-gray-50
                         shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04),inset_-3px_-3px_8px_rgba(255,255,255,0.7)]">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-medium text-slate-700 font-heading">表格数据</h3>
+            <h3 className="font-medium text-slate-700 font-heading">结构化文档</h3>
             <button
-              onClick={() => copyToClipboard(session.table_content)}
-              className="text-xs text-blue-500 hover:text-blue-600 cursor-pointer"
+              onClick={() => session.table_content && copyToClipboard(session.table_content)}
+              disabled={!session.table_content}
+              className="text-xs text-blue-500 hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              复制 JSON
+              复制
             </button>
           </div>
-          <SessionTableView
-            tableContent={session.table_content}
+          <MarkdownDocumentViewer
+            content={session.table_content || ''}
             sessionId={session.id}
-            onUpdate={(newContent) => {
-              setSession(prev => prev ? { ...prev, table_content: newContent } : null);
-            }}
+            onSave={handleSaveTableContent}
+            onRegenerate={handleRegenerateTable}
+            isRegenerating={isRegeneratingTable}
           />
         </div>
       )}

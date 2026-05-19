@@ -95,18 +95,13 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
   };
 
   const handleGenerateTable = async (sessionId: string) => {
-    if (!project.table_structure_prompt) {
-      alert('项目未设置表格结构提示词，请先在表格汇总中设计表格结构');
-      return;
-    }
-
     setGeneratingTableId(sessionId);
     try {
       await generateSessionTable(sessionId);
       await loadSessions();
       onGenerateTable?.();
     } catch (err) {
-      alert('生成表格失败: ' + (err instanceof Error ? err.message : '未知错误'));
+      alert('生成文档失败: ' + (err instanceof Error ? err.message : '未知错误'));
     } finally {
       setGeneratingTableId(null);
     }
@@ -264,14 +259,14 @@ export function SessionList({ project, onSelect, onImport, onRecord, onSessionsL
                                    disabled:opacity-50 disabled:cursor-not-allowed
                                    cursor-pointer transition-colors"
                       >
-                        {generatingTableId === session.id ? '生成中...' : '生成表格'}
+                        {generatingTableId === session.id ? '生成中...' : '生成文档'}
                       </button>
                     )}
 
                     {/* Table generated indicator */}
                     {session.status === 'tabled' && (
                       <span className="px-2 py-1 rounded-lg text-xs font-medium text-indigo-600 bg-indigo-50">
-                        ✓ 表格
+                        ✓ 文档
                       </span>
                     )}
 

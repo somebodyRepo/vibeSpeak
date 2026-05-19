@@ -480,135 +480,59 @@ class LLMService:
             print(f"Generate final content sync error: {e}")
             return ""
 
-    # ===== 表格结构提示词设计方法 =====
+    # ===== 单访谈 Markdown 结构化文档生成方法 =====
 
-    DESIGN_TABLE_STRUCTURE_PROMPT = """你是专业的调研数据分析专家。请根据以下调研提纲和已完成访谈内容，设计一个表格结构提示词。
+    GENERATE_SESSION_MARKDOWN_PROMPT = """你是专业的调研访谈记录整理专家。请根据以下访谈转写文本和已有的结构化内容，生成一份完整的多维度 Markdown 结构化文档。
 
-## 调研提纲
-{outline_json}
+## 访谈转写文本（原始记录）
+{transcript}
 
-## 已完成访谈内容摘要
-{final_contents}
-
-## 要求
-1. 分析提纲结构，确定表格的列（维度）
-2. 根据访谈内容，确定表格的行（每个访谈一行）
-3. 设计表格结构提示词，用自然语言描述：
-   - 表格的用途和目的
-   - 每列的含义和填写要求
-   - 数据提取的规则和标准
-   - 特殊情况的处理方式
-4. 提示词应该清晰、具体，便于后续 LLM 按此结构提取数据
-
-## 输出格式
-请直接输出表格结构提示词，不需要额外的标题或解释。提示词应该是完整的、可以直接使用的自然语言描述。
-"""
-
-    async def design_table_structure_prompt(
-        self,
-        outline: dict,
-        final_contents: list[str],
-    ) -> str:
-        """设计表格结构提示词"""
-        await self.initialize()
-
-        if not self.client:
-            return ""
-
-        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
-        final_contents_text = "\n\n---\n\n".join(final_contents[:5])  # 最多取5个访谈
-        system_prompt = self.DESIGN_TABLE_STRUCTURE_PROMPT.format(
-            outline_json=outline_json,
-            final_contents=final_contents_text,
-        )
-
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请设计表格结构提示词"},
-                ],
-                temperature=0.3,
-            )
-            return response.choices[0].message.content or ""
-
-        except Exception as e:
-            print(f"Design table structure prompt error: {e}")
-            return ""
-
-    def design_table_structure_prompt_sync(
-        self,
-        outline: dict,
-        final_contents: list[str],
-    ) -> str:
-        """设计表格结构提示词（同步版本）"""
-        if not self._ensure_sync_client():
-            return ""
-
-        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
-        final_contents_text = "\n\n---\n\n".join(final_contents[:5])
-        system_prompt = self.DESIGN_TABLE_STRUCTURE_PROMPT.format(
-            outline_json=outline_json,
-            final_contents=final_contents_text,
-        )
-
-        try:
-            response = self._sync_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请设计表格结构提示词"},
-                ],
-                temperature=0.3,
-            )
-            return response.choices[0].message.content or ""
-
-        except Exception as e:
-            print(f"Design table structure prompt sync error: {e}")
-            return ""
-
-    # ===== 单访谈表格生成方法 =====
-
-    GENERATE_SESSION_TABLE_PROMPT = """你是专业的调研数据分析专家。请根据以下表格结构提示词和访谈内容，生成结构化的表格数据。
-
-## 表格结构提示词
-{table_structure_prompt}
-
-## 访谈内容
+## 已提取的结构化内容
 {final_content}
 
 ## 要求
-1. 严格按照提示词定义的结构生成数据
-2. 每个维度提取对应的信息，如无相关信息则标记为"未提及"
-3. 数据要准确、简洁，保留关键细节
-4. 输出 JSON 格式，便于后续处理
+请生成一份结构化的 Markdown 文档，包含以下部分：
+
+### 1. 基本信息
+- 访谈对象（如有提及）
+- 访谈时间/地点（如有提及）
+- 访谈主题概述
+
+### 2. 核心发现（按主题组织）
+将访谈中的关键信息按主题分类整理，每个主题下列出要点。这是文档的核心内容，需要详细且准确。
+
+### 3. 数据表格（频次/对比类）
+如果访谈中包含频次统计、对比分析等数据，请整理成 Markdown 表格格式。例如：
+| 类别 | 数量/频次 | 备注 |
+|------|-----------|------|
+| ... | ... | ... |
+
+### 4. 补充信息
+访谈中其他有价值但未归类到核心发现的信息。
+
+### 5. 关键引用（原话）
+保留访谈中具有代表性的原话引用，帮助理解上下文。使用引用格式：
+> "原话内容"
 
 ## 输出格式
-请以 JSON 格式输出，结构如下：
-{{
-  "rows": [
-    {{"dimension": "维度名称", "value": "提取的值"}},
-    ...
-  ]
-}}
-
-请确保输出是有效的 JSON 格式，不要包含其他解释文字。
+请直接输出 Markdown 格式的完整文档，确保结构清晰、内容准确。文档应以一级标题开始，各部分使用二级标题。
 """
 
-    async def generate_session_table(
+    # ===== 单访谈 Markdown 文档生成方法 =====
+
+    async def generate_session_markdown(
         self,
-        table_structure_prompt: str,
+        transcript: str,
         final_content: str,
     ) -> str:
-        """根据提示词生成单访谈表格 JSON"""
+        """根据转写文本和结构化内容生成 Markdown 文档"""
         await self.initialize()
 
         if not self.client:
             return ""
 
-        system_prompt = self.GENERATE_SESSION_TABLE_PROMPT.format(
-            table_structure_prompt=table_structure_prompt,
+        system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
+            transcript=transcript,
             final_content=final_content,
         )
 
@@ -617,27 +541,27 @@ class LLMService:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请生成表格数据"},
+                    {"role": "user", "content": "请生成结构化 Markdown 文档"},
                 ],
                 temperature=0.3,
             )
             return response.choices[0].message.content or ""
 
         except Exception as e:
-            print(f"Generate session table error: {e}")
+            print(f"Generate session markdown error: {e}")
             return ""
 
-    def generate_session_table_sync(
+    def generate_session_markdown_sync(
         self,
-        table_structure_prompt: str,
+        transcript: str,
         final_content: str,
     ) -> str:
-        """根据提示词生成单访谈表格 JSON（同步版本）"""
+        """根据转写文本和结构化内容生成 Markdown 文档（同步版本）"""
         if not self._ensure_sync_client():
             return ""
 
-        system_prompt = self.GENERATE_SESSION_TABLE_PROMPT.format(
-            table_structure_prompt=table_structure_prompt,
+        system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
+            transcript=transcript,
             final_content=final_content,
         )
 
@@ -646,31 +570,30 @@ class LLMService:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请生成表格数据"},
+                    {"role": "user", "content": "请生成结构化 Markdown 文档"},
                 ],
                 temperature=0.3,
             )
             return response.choices[0].message.content or ""
 
         except Exception as e:
-            print(f"Generate session table sync error: {e}")
+            print(f"Generate session markdown sync error: {e}")
             return ""
 
     # ===== 表格整合汇总方法 =====
 
-    SUMMARIZE_TABLES_PROMPT = """你是专业的调研数据分析专家。请将以下多个访谈的表格数据整合为一个汇总表格。
+    SUMMARIZE_MARKDOWN_PROMPT = """你是专业的调研数据分析专家。请将以下多个访谈的结构化文档整合为一个汇总表格。
 
-## 表格结构提示词
-{table_structure_prompt}
-
-## 各访谈表格数据
-{session_tables}
+## 各访谈结构化文档
+{session_docs}
 
 ## 要求
-1. 按照表格结构提示词定义的维度组织汇总表
-2. 每个访谈作为一行，每个维度作为一列
-3. 保持数据准确，直接提取原始值
-4. 使用 Markdown 表格格式输出
+1. 分析各访谈文档，识别共同的关键维度（如：基本信息、核心观点、问题反馈、建议等）
+2. 根据文档内容自动确定表格列标题
+3. 每个访谈作为一行，每个维度作为一列
+4. 保持数据准确，直接提取原始值
+5. 使用 Markdown 表格格式输出
+6. 如果某个访谈缺少某个维度的信息，填写"无"或"-"
 
 ## 输出格式
 请输出 Markdown 格式的表格，结构如下：
@@ -684,24 +607,22 @@ class LLMService:
 
     async def summarize_tables(
         self,
-        table_structure_prompt: str,
-        session_tables: list[dict],
+        session_docs: list[str],
     ) -> str:
-        """整合多个访谈的表格数据为汇总 Markdown 表格"""
+        """整合多个访谈的 Markdown 文档为汇总表格"""
         await self.initialize()
 
         if not self.client:
             return ""
 
-        # 格式化各个表格数据
-        formatted_tables = []
-        for i, table in enumerate(session_tables):
-            formatted_tables.append(f"### 访谈 {i + 1}\n```json\n{json.dumps(table, ensure_ascii=False, indent=2)}\n```")
+        # 格式化各个文档
+        formatted_docs = []
+        for i, doc in enumerate(session_docs):
+            formatted_docs.append(f"### 访谈 {i + 1}\n\n{doc}")
 
-        session_tables_text = "\n\n---\n\n".join(formatted_tables)
-        system_prompt = self.SUMMARIZE_TABLES_PROMPT.format(
-            table_structure_prompt=table_structure_prompt,
-            session_tables=session_tables_text,
+        session_docs_text = "\n\n---\n\n".join(formatted_docs)
+        system_prompt = self.SUMMARIZE_MARKDOWN_PROMPT.format(
+            session_docs=session_docs_text,
         )
 
         try:
@@ -721,21 +642,19 @@ class LLMService:
 
     def summarize_tables_sync(
         self,
-        table_structure_prompt: str,
-        session_tables: list[dict],
+        session_docs: list[str],
     ) -> str:
-        """整合多个访谈的表格数据为汇总 Markdown 表格（同步版本）"""
+        """整合多个访谈的 Markdown 文档为汇总表格（同步版本）"""
         if not self._ensure_sync_client():
             return ""
 
-        formatted_tables = []
-        for i, table in enumerate(session_tables):
-            formatted_tables.append(f"### 访谈 {i + 1}\n```json\n{json.dumps(table, ensure_ascii=False, indent=2)}\n```")
+        formatted_docs = []
+        for i, doc in enumerate(session_docs):
+            formatted_docs.append(f"### 访谈 {i + 1}\n\n{doc}")
 
-        session_tables_text = "\n\n---\n\n".join(formatted_tables)
-        system_prompt = self.SUMMARIZE_TABLES_PROMPT.format(
-            table_structure_prompt=table_structure_prompt,
-            session_tables=session_tables_text,
+        session_docs_text = "\n\n---\n\n".join(formatted_docs)
+        system_prompt = self.SUMMARIZE_MARKDOWN_PROMPT.format(
+            session_docs=session_docs_text,
         )
 
         try:

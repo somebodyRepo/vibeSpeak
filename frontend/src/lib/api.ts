@@ -421,41 +421,6 @@ export async function exportSessionFinal(sessionId: string): Promise<Blob> {
   return response.blob();
 }
 
-// ===== 表格结构提示词 API =====
-
-export async function designTableStructure(projectId: string): Promise<{ success: boolean; prompt: string }> {
-  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/design-table-structure`, {
-    method: 'POST',
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to design table structure');
-  }
-  return response.json();
-}
-
-export async function updateTableStructure(projectId: string, prompt: string): Promise<{ success: boolean }> {
-  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/table-structure`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to update table structure');
-  }
-  return response.json();
-}
-
-export async function getTableStructure(projectId: string): Promise<{ success: boolean; prompt: string; has_outline: boolean }> {
-  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/table-structure`);
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to get table structure');
-  }
-  return response.json();
-}
-
 // ===== 单访谈表格生成 API =====
 
 export async function generateSessionTable(sessionId: string): Promise<{ success: boolean; table_content: string }> {
@@ -533,7 +498,7 @@ export async function summarizeTables(projectId: string): Promise<{ success: boo
   return response.json();
 }
 
-export async function getSummaryTable(projectId: string): Promise<{ success: boolean; summary_table: string; has_prompt: boolean }> {
+export async function getSummaryTable(projectId: string): Promise<{ success: boolean; summary_table: string }> {
   const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/summary-table`);
   if (!response.ok) {
     const error = await response.json();

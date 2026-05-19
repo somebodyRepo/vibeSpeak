@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,7 +31,7 @@ class BatchGenerationProgress:
 
 
 class BatchTableGenerationService:
-    """Service for managing batch table generation tasks"""
+    """Service for managing batch Markdown document generation tasks"""
 
     _instance = None
     _lock = asyncio.Lock()
@@ -61,10 +60,15 @@ class BatchTableGenerationService:
         self,
         project_id: str,
         session_ids: list[str],
-        table_structure_prompt: str,
-        session_contents: Dict[str, str],
+        session_data: Dict[str, dict],
     ) -> BatchGenerationProgress:
-        """Start batch generation for a project"""
+        """Start batch Markdown generation for a project
+
+        Args:
+            project_id: Project ID
+            session_ids: List of session IDs to process
+            session_data: Dict mapping session_id to {"transcript": str, "final_content": str}
+        """
         progress = BatchGenerationProgress(
             project_id=project_id,
             total_count=len(session_ids),
@@ -80,11 +84,12 @@ class BatchTableGenerationService:
             progress.tasks[session_id] = task
 
             # Add to queue
+            data = session_data.get(session_id, {})
             self._queue.put_nowait({
                 "session_id": session_id,
                 "project_id": project_id,
-                "table_structure_prompt": table_structure_prompt,
-                "final_content": session_contents.get(session_id, ""),
+                "transcript": data.get("transcript", ""),
+                "final_content": data.get("final_content", ""),
             })
 
         self._progress[project_id] = progress
@@ -127,10 +132,10 @@ class BatchTableGenerationService:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _process_task(self, task_data: dict):
-        """Process a single table generation task"""
+        """Process a single Markdown generation task"""
         session_id = task_data["session_id"]
         project_id = task_data["project_id"]
-        table_structure_prompt = task_data["table_structure_prompt"]
+        transcript = task_data["transcript"]
         final_content = task_data["final_content"]
 
         progress = self._progress.get(project_id)
@@ -145,17 +150,17 @@ class BatchTableGenerationService:
         task.started_at = datetime.utcnow()
 
         try:
-            # Generate table
-            table_json = await llm_service.generate_session_table(
-                table_structure_prompt=table_structure_prompt,
+            # Generate Markdown document
+            markdown_content = await llm_service.generate_session_markdown(
+                transcript=transcript,
                 final_content=final_content,
             )
 
-            # Validate and fix JSON
-            table_json = self._validate_and_fix_json(table_json)
+            if not markdown_content:
+                raise ValueError("LLM returned empty content")
 
             # Update database
-            await self._update_session_table(session_id, table_json)
+            await self._update_session_table(session_id, markdown_content)
 
             task.status = "done"
             task.completed_at = datetime.utcnow()
@@ -178,27 +183,7 @@ class BatchTableGenerationService:
         if progress.completed_count + progress.error_count >= progress.total_count:
             progress.is_running = False
 
-    def _validate_and_fix_json(self, table_json: str) -> str:
-        """Validate and fix JSON format"""
-        try:
-            parsed = json.loads(table_json)
-            if "rows" not in parsed:
-                table_json = json.dumps({"rows": parsed if isinstance(parsed, list) else []})
-            return table_json
-        except json.JSONDecodeError:
-            import re
-            json_match = re.search(r'\{[\s\S]*\}', table_json)
-            if json_match:
-                try:
-                    parsed = json.loads(json_match.group())
-                    if "rows" not in parsed:
-                        return json.dumps({"rows": parsed if isinstance(parsed, list) else []})
-                    return json_match.group()
-                except json.JSONDecodeError:
-                    raise ValueError("Invalid JSON format")
-            raise ValueError("No JSON found in response")
-
-    async def _update_session_table(self, session_id: str, table_json: str):
+    async def _update_session_table(self, session_id: str, markdown_content: str):
         """Update session in database"""
         from app.models.database import AsyncSessionLocal, InterviewSessionDB
         from sqlalchemy import select
@@ -209,7 +194,7 @@ class BatchTableGenerationService:
             )
             session = result.scalar_one_or_none()
             if session:
-                session.table_content = table_json
+                session.table_content = markdown_content
                 session.status = "tabled"
                 await db.commit()
 

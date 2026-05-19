@@ -1,4 +1,4 @@
-"""Unit tests for LLM service table-related methods"""
+"""Unit tests for LLM service Markdown-related methods"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
@@ -6,111 +6,44 @@ import json
 from app.services.llm_service import LLMService, llm_service
 
 
-class TestDesignTableStructurePrompt:
-    """Tests for design_table_structure_prompt method"""
+class TestGenerateSessionMarkdown:
+    """Tests for generate_session_markdown method"""
 
     @pytest.mark.asyncio
-    async def test_design_prompt_success(self):
-        """Test successful prompt generation"""
+    async def test_generate_markdown_success(self):
+        """Test successful Markdown generation"""
         service = LLMService()
         service._initialized = True
         service.client = AsyncMock()
         service.model = "test-model"
 
+        expected_markdown = """# 访谈记录
+
+## 基本信息
+- 访谈对象: 张三
+- 访谈时间: 2024年
+
+## 核心发现
+- 要点1
+- 要点2
+"""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "表格结构提示词内容"
+        mock_response.choices[0].message.content = expected_markdown
 
         service.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        outline = {
-            "sections": [
-                {"id": "s1", "title": "基本信息", "questions": ["姓名", "年龄"]}
-            ]
-        }
-        final_contents = ["访谈内容1", "访谈内容2"]
-
-        result = await service.design_table_structure_prompt(
-            outline=outline,
-            final_contents=final_contents,
+        result = await service.generate_session_markdown(
+            transcript="原始转写内容",
+            final_content="结构化内容",
         )
 
-        assert result == "表格结构提示词内容"
+        assert result == expected_markdown
         service.client.chat.completions.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_design_prompt_limits_contents(self):
-        """Test that design limits to 5 final contents"""
-        service = LLMService()
-        service._initialized = True
-        service.client = AsyncMock()
-        service.model = "test-model"
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "提示词"
-        service.client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        outline = {"sections": []}
-        # 7 contents, should only use 5
-        final_contents = [f"内容{i}" for i in range(7)]
-
-        await service.design_table_structure_prompt(
-            outline=outline,
-            final_contents=final_contents,
-        )
-
-        # Check that prompt was built correctly (5 contents)
-        call_args = service.client.chat.completions.create.call_args
-        messages = call_args.kwargs["messages"]
-        system_prompt = messages[0]["content"]
-
-        # Should contain separator between contents
-        assert "---" in system_prompt
-
-    @pytest.mark.asyncio
-    async def test_design_prompt_no_client(self):
-        """Test design when client not initialized"""
-        service = LLMService()
-        service._initialized = True
-        service.client = None
-
-        result = await service.design_table_structure_prompt(
-            outline={},
-            final_contents=[],
-        )
-
-        assert result == ""
-
-
-class TestGenerateSessionTable:
-    """Tests for generate_session_table method"""
-
-    @pytest.mark.asyncio
-    async def test_generate_table_success(self):
-        """Test successful table generation"""
-        service = LLMService()
-        service._initialized = True
-        service.client = AsyncMock()
-        service.model = "test-model"
-
-        expected_json = '{"rows": [{"dimension": "姓名", "value": "张三"}]}'
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = expected_json
-
-        service.client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        result = await service.generate_session_table(
-            table_structure_prompt="测试提示词",
-            final_content="访谈内容",
-        )
-
-        assert result == expected_json
-
-    @pytest.mark.asyncio
-    async def test_generate_table_empty_response(self):
-        """Test table generation with empty response"""
+    async def test_generate_markdown_empty_response(self):
+        """Test Markdown generation with empty response"""
         service = LLMService()
         service._initialized = True
         service.client = AsyncMock()
@@ -122,16 +55,16 @@ class TestGenerateSessionTable:
 
         service.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        result = await service.generate_session_table(
-            table_structure_prompt="测试提示词",
-            final_content="访谈内容",
+        result = await service.generate_session_markdown(
+            transcript="内容",
+            final_content="结构化",
         )
 
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_generate_table_error_handling(self):
-        """Test table generation error handling"""
+    async def test_generate_markdown_error_handling(self):
+        """Test Markdown generation error handling"""
         service = LLMService()
         service._initialized = True
         service.client = AsyncMock()
@@ -141,16 +74,16 @@ class TestGenerateSessionTable:
             side_effect=Exception("API error")
         )
 
-        result = await service.generate_session_table(
-            table_structure_prompt="测试提示词",
-            final_content="访谈内容",
+        result = await service.generate_session_markdown(
+            transcript="内容",
+            final_content="结构化",
         )
 
         assert result == ""
 
 
 class TestSummarizeTables:
-    """Tests for summarize_tables method"""
+    """Tests for summarize_tables method (Markdown-based)"""
 
     @pytest.mark.asyncio
     async def test_summarize_success(self):
@@ -167,21 +100,18 @@ class TestSummarizeTables:
 
         service.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        session_tables = [
-            {"rows": [{"dimension": "姓名", "value": "张三"}]},
-            {"rows": [{"dimension": "姓名", "value": "李四"}]},
+        session_docs = [
+            "# 访谈1\n\n## 基本信息\n- 姓名: 张三",
+            "# 访谈2\n\n## 基本信息\n- 姓名: 李四",
         ]
 
-        result = await service.summarize_tables(
-            table_structure_prompt="测试提示词",
-            session_tables=session_tables,
-        )
+        result = await service.summarize_tables(session_docs=session_docs)
 
         assert result == expected_markdown
 
     @pytest.mark.asyncio
-    async def test_summarize_formats_tables(self):
-        """Test that summarize properly formats input tables"""
+    async def test_summarize_formats_docs(self):
+        """Test that summarize properly formats input docs"""
         service = LLMService()
         service._initialized = True
         service.client = AsyncMock()
@@ -193,21 +123,15 @@ class TestSummarizeTables:
 
         service.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        session_tables = [
-            {"rows": [{"dimension": "姓名", "value": "张三"}]},
-        ]
+        session_docs = ["# 访谈1\n内容"]
 
-        await service.summarize_tables(
-            table_structure_prompt="测试提示词",
-            session_tables=session_tables,
-        )
+        await service.summarize_tables(session_docs=session_docs)
 
-        # Check that the prompt contains formatted JSON
+        # Check that the prompt contains formatted docs
         call_args = service.client.chat.completions.create.call_args
         system_prompt = call_args.kwargs["messages"][0]["content"]
 
         assert "访谈 1" in system_prompt
-        assert "```json" in system_prompt
 
     @pytest.mark.asyncio
     async def test_summarize_no_client(self):
@@ -216,10 +140,7 @@ class TestSummarizeTables:
         service._initialized = True
         service.client = None
 
-        result = await service.summarize_tables(
-            table_structure_prompt="测试",
-            session_tables=[],
-        )
+        result = await service.summarize_tables(session_docs=[])
 
         assert result == ""
 
@@ -227,46 +148,26 @@ class TestSummarizeTables:
 class TestSyncMethods:
     """Tests for sync versions of methods"""
 
-    def test_design_table_structure_prompt_sync(self):
-        """Test sync version of design prompt"""
+    def test_generate_session_markdown_sync(self):
+        """Test sync version of Markdown generation"""
         service = LLMService()
         service._sync_initialized = True
         service._sync_client = MagicMock()
         service.model = "test-model"
 
+        expected_markdown = "# 访谈\n内容"
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "同步提示词"
+        mock_response.choices[0].message.content = expected_markdown
 
         service._sync_client.chat.completions.create = MagicMock(return_value=mock_response)
 
-        result = service.design_table_structure_prompt_sync(
-            outline={},
-            final_contents=["内容"],
+        result = service.generate_session_markdown_sync(
+            transcript="转写",
+            final_content="结构化",
         )
 
-        assert result == "同步提示词"
-
-    def test_generate_session_table_sync(self):
-        """Test sync version of table generation"""
-        service = LLMService()
-        service._sync_initialized = True
-        service._sync_client = MagicMock()
-        service.model = "test-model"
-
-        expected_json = '{"rows": []}'
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = expected_json
-
-        service._sync_client.chat.completions.create = MagicMock(return_value=mock_response)
-
-        result = service.generate_session_table_sync(
-            table_structure_prompt="测试",
-            final_content="内容",
-        )
-
-        assert result == expected_json
+        assert result == expected_markdown
 
     def test_summarize_tables_sync(self):
         """Test sync version of summarization"""
@@ -281,10 +182,7 @@ class TestSyncMethods:
 
         service._sync_client.chat.completions.create = MagicMock(return_value=mock_response)
 
-        result = service.summarize_tables_sync(
-            table_structure_prompt="测试",
-            session_tables=[{"rows": []}],
-        )
+        result = service.summarize_tables_sync(session_docs=["文档1"])
 
         assert result == "| 访谈 | 姓名 |"
 
@@ -294,42 +192,30 @@ class TestSyncMethods:
         service._sync_initialized = True
         service._sync_client = None
 
-        result1 = service.design_table_structure_prompt_sync(outline={}, final_contents=[])
-        result2 = service.generate_session_table_sync(table_structure_prompt="", final_content="")
-        result3 = service.summarize_tables_sync(table_structure_prompt="", session_tables=[])
+        result1 = service.generate_session_markdown_sync(transcript="", final_content="")
+        result2 = service.summarize_tables_sync(session_docs=[])
 
         assert result1 == ""
         assert result2 == ""
-        assert result3 == ""
 
 
 class TestPromptTemplates:
     """Tests for prompt template correctness"""
 
-    def test_design_prompt_template_format(self):
-        """Test that design prompt template has correct placeholders"""
-        template = LLMService.DESIGN_TABLE_STRUCTURE_PROMPT
+    def test_generate_markdown_prompt_template_format(self):
+        """Test that generate Markdown prompt template has correct placeholders"""
+        template = LLMService.GENERATE_SESSION_MARKDOWN_PROMPT
 
-        assert "{outline_json}" in template
-        assert "{final_contents}" in template
-        assert "表格结构提示词" in template
-        assert "维度" in template
-
-    def test_generate_table_prompt_template_format(self):
-        """Test that generate table prompt template has correct placeholders"""
-        template = LLMService.GENERATE_SESSION_TABLE_PROMPT
-
-        assert "{table_structure_prompt}" in template
+        assert "{transcript}" in template
         assert "{final_content}" in template
-        assert "JSON" in template
-        assert "rows" in template
+        assert "Markdown" in template
+        assert "基本信息" in template
 
-    def test_summarize_prompt_template_format(self):
+    def test_summarize_markdown_prompt_template_format(self):
         """Test that summarize prompt template has correct placeholders"""
-        template = LLMService.SUMMARIZE_TABLES_PROMPT
+        template = LLMService.SUMMARIZE_MARKDOWN_PROMPT
 
-        assert "{table_structure_prompt}" in template
-        assert "{session_tables}" in template
+        assert "{session_docs}" in template
         assert "Markdown" in template
         assert "| 访谈 |" in template
 

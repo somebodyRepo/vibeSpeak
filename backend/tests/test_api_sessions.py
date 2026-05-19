@@ -1,5 +1,4 @@
 """API integration tests for session table endpoints"""
-import json
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,16 +18,16 @@ class TestGenerateSessionTable:
         sample_session: dict,
         monkeypatch,
     ):
-        """Test successful single session table generation"""
+        """Test successful single session Markdown document generation"""
         from app.services import llm_service
 
-        async def mock_generate_table(table_structure_prompt, final_content):
-            return '{"rows": [{"dimension": "姓名", "value": "张三"}]}'
+        async def mock_generate_markdown(transcript, final_content):
+            return "# 访谈记录\n\n## 基本信息\n访谈对象: 张三"
 
         monkeypatch.setattr(
             llm_service.llm_service,
-            "generate_session_table",
-            mock_generate_table,
+            "generate_session_markdown",
+            mock_generate_markdown,
         )
 
         response = await client.post(f"/sessions/{sample_session['id']}/generate-table")
@@ -37,10 +36,7 @@ class TestGenerateSessionTable:
         data = response.json()
         assert data["success"] is True
         assert "table_content" in data
-
-        # Verify table_content is valid JSON
-        parsed = json.loads(data["table_content"])
-        assert "rows" in parsed
+        assert "# 访谈记录" in data["table_content"]
 
     @pytest.mark.asyncio
     async def test_generate_table_session_not_found(
@@ -80,13 +76,13 @@ class TestGenerateSessionTable:
         assert "尚未完成" in response.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_generate_table_no_final_content(
+    async def test_generate_table_no_transcript(
         self,
         client: AsyncClient,
         test_db: AsyncSession,
         sample_project: dict,
     ):
-        """Test generate table when no final content"""
+        """Test generate table when no transcript"""
         from uuid import uuid4
 
         session_id = str(uuid4())
@@ -97,7 +93,7 @@ class TestGenerateSessionTable:
             audio_path="/tmp/no_content.wav",  # Required field
             duration_s=45.0,
             status="done",
-            final_content="",  # Empty
+            raw_transcript="",  # Empty transcript
         )
         test_db.add(session)
         await test_db.commit()
@@ -105,45 +101,7 @@ class TestGenerateSessionTable:
         response = await client.post(f"/sessions/{session_id}/generate-table")
 
         assert response.status_code == 400
-        assert "无最终内容" in response.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_generate_table_no_project_prompt(
-        self,
-        client: AsyncClient,
-        test_db: AsyncSession,
-        sample_outline: dict,
-    ):
-        """Test generate table when project has no table structure prompt"""
-        from uuid import uuid4
-
-        # Create project without table_structure_prompt
-        project_id = str(uuid4())
-        project = ProjectDB(
-            id=project_id,
-            name="无提示词项目",
-            outline_id=sample_outline["id"],
-            table_structure_prompt="",  # Empty
-        )
-        test_db.add(project)
-
-        session_id = str(uuid4())
-        session = InterviewSessionDB(
-            id=session_id,
-            project_id=project_id,
-            filename="test.wav",
-            audio_path="/tmp/test.wav",  # Required field
-            duration_s=60.0,
-            status="done",
-            final_content="内容",
-        )
-        test_db.add(session)
-        await test_db.commit()
-
-        response = await client.post(f"/sessions/{session_id}/generate-table")
-
-        assert response.status_code == 400
-        assert "未设置表格结构提示词" in response.json()["detail"]
+        assert "无转写内容" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_generate_table_updates_status(
@@ -157,13 +115,13 @@ class TestGenerateSessionTable:
         """Test that generating table updates session status to tabled"""
         from app.services import llm_service
 
-        async def mock_generate_table(table_structure_prompt, final_content):
-            return '{"rows": []}'
+        async def mock_generate_markdown(transcript, final_content):
+            return "# 访谈记录\n\n## 基本信息\n内容"
 
         monkeypatch.setattr(
             llm_service.llm_service,
-            "generate_session_table",
-            mock_generate_table,
+            "generate_session_markdown",
+            mock_generate_markdown,
         )
 
         await client.post(f"/sessions/{sample_session['id']}/generate-table")
@@ -174,6 +132,31 @@ class TestGenerateSessionTable:
         )
         session = result.scalar_one()
         assert session.status == "tabled"
+
+    @pytest.mark.asyncio
+    async def test_generate_table_llm_empty_response(
+        self,
+        client: AsyncClient,
+        sample_project: dict,
+        sample_session: dict,
+        monkeypatch,
+    ):
+        """Test generate table when LLM returns empty response"""
+        from app.services import llm_service
+
+        async def mock_generate_markdown(transcript, final_content):
+            return ""  # Empty response
+
+        monkeypatch.setattr(
+            llm_service.llm_service,
+            "generate_session_markdown",
+            mock_generate_markdown,
+        )
+
+        response = await client.post(f"/sessions/{sample_session['id']}/generate-table")
+
+        assert response.status_code == 500
+        assert "LLM 生成文档失败" in response.json()["detail"]
 
 
 class TestGetSessionTable:
@@ -222,14 +205,14 @@ class TestUpdateSessionTable:
     """Tests for PUT /sessions/{session_id}/table"""
 
     @pytest.mark.asyncio
-    async def test_update_table_success(
+    async def test_update_table_success_markdown(
         self,
         client: AsyncClient,
         tabled_session: dict,
         test_db: AsyncSession,
     ):
-        """Test successful table update"""
-        new_content = '{"rows": [{"dimension": "姓名", "value": "李四"}]}'
+        """Test successful table update with Markdown content"""
+        new_content = "# 访谈记录\n\n## 基本信息\n访谈对象: 李四"
 
         response = await client.put(
             f"/sessions/{tabled_session['id']}/table",
@@ -248,21 +231,6 @@ class TestUpdateSessionTable:
         assert session.table_content == new_content
 
     @pytest.mark.asyncio
-    async def test_update_table_invalid_json(
-        self,
-        client: AsyncClient,
-        tabled_session: dict,
-    ):
-        """Test update with invalid JSON"""
-        response = await client.put(
-            f"/sessions/{tabled_session['id']}/table",
-            json={"table_content": "not valid json"},
-        )
-
-        assert response.status_code == 400
-        assert "Invalid JSON" in response.json()["detail"]
-
-    @pytest.mark.asyncio
     async def test_update_table_session_not_found(
         self,
         client: AsyncClient,
@@ -270,96 +238,10 @@ class TestUpdateSessionTable:
         """Test update with non-existent session"""
         response = await client.put(
             "/sessions/non-existent-id/table",
-            json={"table_content": '{"rows": []}'},
+            json={"table_content": "# test"},
         )
 
         assert response.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_update_table_complex_json(
-        self,
-        client: AsyncClient,
-        tabled_session: dict,
-    ):
-        """Test update with complex nested JSON"""
-        complex_content = json.dumps({
-            "rows": [
-                {"dimension": "基本信息", "value": {"name": "张三", "age": 30}},
-                {"dimension": "工作", "value": ["工程师", "经理"]},
-            ]
-        })
-
-        response = await client.put(
-            f"/sessions/{tabled_session['id']}/table",
-            json={"table_content": complex_content},
-        )
-
-        assert response.status_code == 200
-
-
-class TestSessionTableJSONHandling:
-    """Tests for JSON format handling in table endpoints"""
-
-    @pytest.mark.asyncio
-    async def test_generate_table_wraps_array(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        sample_session: dict,
-        monkeypatch,
-    ):
-        """Test that array response gets wrapped in {rows: ...}"""
-        from app.services import llm_service
-
-        async def mock_generate_table(table_structure_prompt, final_content):
-            # Return array without wrapping
-            return '[{"dimension": "姓名", "value": "张三"}]'
-
-        monkeypatch.setattr(
-            llm_service.llm_service,
-            "generate_session_table",
-            mock_generate_table,
-        )
-
-        response = await client.post(f"/sessions/{sample_session['id']}/generate-table")
-
-        assert response.status_code == 200
-        data = response.json()
-
-        # Should be wrapped
-        parsed = json.loads(data["table_content"])
-        assert "rows" in parsed
-        assert len(parsed["rows"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_generate_table_extracts_json_from_text(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        sample_session: dict,
-        monkeypatch,
-    ):
-        """Test that JSON is extracted from surrounding text"""
-        from app.services import llm_service
-
-        async def mock_generate_table(table_structure_prompt, final_content):
-            # Return JSON embedded in text
-            return '这是表格数据：{"rows": [{"dimension": "姓名", "value": "张三"}]} 结束'
-
-        monkeypatch.setattr(
-            llm_service.llm_service,
-            "generate_session_table",
-            mock_generate_table,
-        )
-
-        response = await client.post(f"/sessions/{sample_session['id']}/generate-table")
-
-        assert response.status_code == 200
-        data = response.json()
-
-        # Should extract valid JSON
-        parsed = json.loads(data["table_content"])
-        assert "rows" in parsed
 
 
 class TestSessionLifecycleWithTables:
@@ -386,13 +268,13 @@ class TestSessionLifecycleWithTables:
         assert session.table_content == "" or session.table_content is None
 
         # Mock LLM
-        async def mock_generate_table(table_structure_prompt, final_content):
-            return '{"rows": [{"dimension": "test", "value": "test"}]}'
+        async def mock_generate_markdown(transcript, final_content):
+            return "# 访谈记录\n\n## 基本信息\n内容"
 
         monkeypatch.setattr(
             llm_service.llm_service,
-            "generate_session_table",
-            mock_generate_table,
+            "generate_session_markdown",
+            mock_generate_markdown,
         )
 
         # Generate table
@@ -412,7 +294,7 @@ class TestSessionLifecycleWithTables:
         test_db: AsyncSession,
     ):
         """Test that updating table preserves tabled status"""
-        new_content = '{"rows": [{"dimension": "updated", "value": "value"}]}'
+        new_content = "# 更新后的内容\n\n## 信息\n更新"
 
         response = await client.put(
             f"/sessions/{tabled_session['id']}/table",

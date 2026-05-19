@@ -285,119 +285,6 @@ async def delete_project(
     return {"success": True, "message": "Project and related sessions deleted"}
 
 
-# ===== 表格结构提示词 API =====
-
-
-@router.post("/{project_id}/design-table-structure")
-async def design_table_structure(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """触发 LLM 生成表格结构提示词"""
-    from app.services.llm_service import llm_service
-
-    # 获取项目
-    result = await db.execute(
-        select(ProjectDB).where(ProjectDB.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # 检查是否有提纲
-    if not project.outline_id:
-        raise HTTPException(status_code=400, detail="项目无关联提纲，无法设计表格结构")
-
-    # 获取提纲
-    outline_result = await db.execute(
-        select(OutlineDB).where(OutlineDB.id == project.outline_id)
-    )
-    outline_db = outline_result.scalar_one_or_none()
-
-    if not outline_db:
-        raise HTTPException(status_code=400, detail="提纲不存在")
-
-    # 获取已完成的访谈（status='done'）
-    session_result = await db.execute(
-        select(InterviewSessionDB)
-        .where(InterviewSessionDB.project_id == project_id)
-        .where(InterviewSessionDB.status == "done")
-        .where(InterviewSessionDB.final_content != "")
-    )
-    sessions = session_result.scalars().all()
-
-    if not sessions:
-        raise HTTPException(status_code=400, detail="无已完成的访谈内容，无法设计表格结构")
-
-    # 解析提纲
-    outline_content = OutlineContent.model_validate_json(outline_db.content)
-
-    # 收集访谈内容
-    final_contents = [s.final_content for s in sessions if s.final_content]
-
-    # 调用 LLM 设计提示词
-    prompt = await llm_service.design_table_structure_prompt(
-        outline=outline_content.model_dump(),
-        final_contents=final_contents,
-    )
-
-    return {
-        "success": True,
-        "prompt": prompt,
-        "message": "表格结构提示词生成成功",
-    }
-
-
-class TableStructureUpdate(BaseModel):
-    prompt: str
-
-
-@router.put("/{project_id}/table-structure")
-async def update_table_structure(
-    project_id: str,
-    request: TableStructureUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    """保存表格结构提示词"""
-    result = await db.execute(
-        select(ProjectDB).where(ProjectDB.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project.table_structure_prompt = request.prompt
-    await db.commit()
-
-    return {
-        "success": True,
-        "message": "表格结构提示词保存成功",
-    }
-
-
-@router.get("/{project_id}/table-structure")
-async def get_table_structure(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """获取当前保存的表格结构提示词"""
-    result = await db.execute(
-        select(ProjectDB).where(ProjectDB.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    return {
-        "success": True,
-        "prompt": project.table_structure_prompt or "",
-        "has_outline": bool(project.outline_id),
-    }
-
-
 # ===== 批量表格生成 API =====
 
 
@@ -406,7 +293,7 @@ async def generate_all_tables(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """触发批量生成所有访谈表格"""
+    """触发批量生成所有访谈的 Markdown 结构化文档"""
     from app.services.batch_table_service import batch_table_service
 
     # 获取项目
@@ -418,15 +305,12 @@ async def generate_all_tables(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if not project.table_structure_prompt:
-        raise HTTPException(status_code=400, detail="项目未设置表格结构提示词，请先设计表格结构")
-
-    # 获取需要生成表格的会话（done状态且未生成表格）
+    # 获取需要生成文档的会话（done状态且未生成文档）
     session_result = await db.execute(
         select(InterviewSessionDB)
         .where(InterviewSessionDB.project_id == project_id)
         .where(InterviewSessionDB.status == "done")
-        .where(InterviewSessionDB.final_content != "")
+        .where(InterviewSessionDB.raw_transcript != "")
         .where(InterviewSessionDB.table_content == "")
     )
     sessions = session_result.scalars().all()
@@ -434,26 +318,31 @@ async def generate_all_tables(
     if not sessions:
         return {
             "success": True,
-            "message": "没有需要生成表格的会话",
+            "message": "没有需要生成文档的会话",
             "total_count": 0,
             "pending_count": 0,
         }
 
-    # 准备会话内容
-    session_contents = {s.id: s.final_content for s in sessions}
+    # 准备会话数据
+    session_data = {
+        s.id: {
+            "transcript": s.raw_transcript or "",
+            "final_content": s.final_content or "",
+        }
+        for s in sessions
+    }
     session_ids = [s.id for s in sessions]
 
     # 启动批量生成
     progress = batch_table_service.start_batch_generation(
         project_id=project_id,
         session_ids=session_ids,
-        table_structure_prompt=project.table_structure_prompt,
-        session_contents=session_contents,
+        session_data=session_data,
     )
 
     return {
         "success": True,
-        "message": f"开始批量生成 {len(sessions)} 个表格",
+        "message": f"开始批量生成 {len(sessions)} 个文档",
         "total_count": progress.total_count,
         "pending_count": progress.total_count - progress.completed_count - progress.error_count,
     }
@@ -517,7 +406,7 @@ async def summarize_tables(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """触发整合所有已生成表格的会话，生成汇总表格"""
+    """触发整合所有已生成文档的会话，生成汇总表格"""
     from app.services.llm_service import llm_service
 
     # 获取项目
@@ -529,10 +418,7 @@ async def summarize_tables(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if not project.table_structure_prompt:
-        raise HTTPException(status_code=400, detail="项目未设置表格结构提示词")
-
-    # 获取所有 tabled 状态的会话
+    # 获取所有 tabled 状态的会话（已生成 Markdown 文档）
     session_result = await db.execute(
         select(InterviewSessionDB)
         .where(InterviewSessionDB.project_id == project_id)
@@ -542,24 +428,17 @@ async def summarize_tables(
     sessions = session_result.scalars().all()
 
     if not sessions:
-        raise HTTPException(status_code=400, detail="没有已生成表格的会话，请先生成表格")
+        raise HTTPException(status_code=400, detail="没有已生成文档的会话，请先生成文档")
 
-    # 解析各会话的表格数据
-    session_tables = []
-    for session in sessions:
-        try:
-            table_data = json.loads(session.table_content)
-            session_tables.append(table_data)
-        except json.JSONDecodeError:
-            continue
+    # 收集各会话的 Markdown 文档
+    session_docs = [s.table_content for s in sessions if s.table_content]
 
-    if not session_tables:
-        raise HTTPException(status_code=400, detail="没有有效的表格数据")
+    if not session_docs:
+        raise HTTPException(status_code=400, detail="没有有效的文档数据")
 
     # 调用 LLM 整合汇总
     summary_markdown = await llm_service.summarize_tables(
-        table_structure_prompt=project.table_structure_prompt,
-        session_tables=session_tables,
+        session_docs=session_docs,
     )
 
     # 保存汇总表格
@@ -568,7 +447,7 @@ async def summarize_tables(
 
     return {
         "success": True,
-        "message": f"成功整合 {len(sessions)} 个访谈的表格",
+        "message": f"成功整合 {len(sessions)} 个访谈的文档",
         "summary_table": summary_markdown,
         "session_count": len(sessions),
     }
@@ -591,7 +470,6 @@ async def get_summary_table(
     return {
         "success": True,
         "summary_table": project.summary_table or "",
-        "has_prompt": bool(project.table_structure_prompt),
     }
 
 

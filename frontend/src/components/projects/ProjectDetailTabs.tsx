@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { SessionList } from '../sessions/SessionList';
 import { TableSummaryTab } from './TableSummaryTab';
 import { getProject } from '../../lib/api';
 import type { Project, InterviewSession } from '../../types';
 
-type ActiveTab = 'info' | 'sessions' | 'summary';
+type ActiveTab = 'sessions' | 'summary';
 
 interface ProjectDetailTabsProps {
   project: Project;
@@ -33,16 +33,18 @@ export function ProjectDetailTabs({
 }: ProjectDetailTabsProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('sessions');
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
-  const [projectRefreshKey, setProjectRefreshKey] = useState(0);
+  const [outlineExpanded, setOutlineExpanded] = useState(false);
 
   const tabs = [
-    { id: 'info', label: '基本信息' },
     { id: 'sessions', label: '访谈会话' },
     { id: 'summary', label: '表格汇总' },
   ];
 
-  // Check if there are completed sessions
-  const hasCompletedSessions = sessions.some(s => s.status === 'done');
+  // Calculate outline statistics
+  const outlineStats = project.outline?.content.sections ? {
+    sections: project.outline.content.sections.length,
+    questions: project.outline.content.sections.reduce((sum, s) => sum + s.questions.length, 0),
+  } : null;
 
   // Handle sessions load to track completed sessions
   const handleSessionsLoad = (loadedSessions: InterviewSession[]) => {
@@ -119,75 +121,44 @@ export function ProjectDetailTabs({
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'info' && (
-        <div className="p-6 rounded-2xl bg-gray-100
-                        shadow-[inset_5px_5px_15px_rgba(0,0,0,0.05),inset_-5px_-5px_15px_rgba(255,255,255,0.8)]">
-          <h3 className="font-medium text-slate-700 mb-2 font-heading">
-            项目信息
-          </h3>
-          <div className="space-y-3 text-sm text-slate-600">
-            <div>
-              <span className="font-medium">名称：</span>
-              {project.name}
-            </div>
-            <div>
-              <span className="font-medium">描述：</span>
-              {project.description || '暂无'}
-            </div>
-            <div>
-              <span className="font-medium">会话数：</span>
-              {project.session_count}
-            </div>
-            <div>
-              <span className="font-medium">创建时间：</span>
-              {new Date(project.created_at).toLocaleString()}
-            </div>
-          </div>
-
-          {/* Outline Preview */}
-          {project.outline && (
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <h3 className="font-medium text-slate-700 mb-2 font-heading">
-                关联提纲: {project.outline.name}
-              </h3>
-              <div className="text-sm text-slate-600 space-y-2">
-                {project.outline.content.sections.map(section => (
-                  <div key={section.id}>
-                    <span className="font-medium">{section.title}</span>
-                    <ul className="ml-4 text-slate-500">
-                      {section.questions.map((q, i) => (
-                        <li key={i}>• {q}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {activeTab === 'sessions' && (
         <>
-          {/* Outline Preview (quick view) */}
-          {project.outline && (
+          {/* Collapsible Outline Preview */}
+          {project.outline && outlineStats && (
             <div className="p-4 rounded-2xl bg-gray-100
                             shadow-[inset_3px_3px_8px_rgba(0,0,0,0.04)]">
-              <h3 className="font-medium text-slate-700 mb-2 font-heading">
-                关联提纲: {project.outline.name}
-              </h3>
-              <div className="text-sm text-slate-600 space-y-2">
-                {project.outline.content.sections.map(section => (
-                  <div key={section.id}>
-                    <span className="font-medium">{section.title}</span>
-                    <ul className="ml-4 text-slate-500">
-                      {section.questions.map((q, i) => (
-                        <li key={i}>• {q}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-medium text-slate-700 font-heading">
+                    关联提纲: {project.outline.name}
+                  </h3>
+                  <span className="text-sm text-slate-500">
+                    ({outlineStats.sections} 个板块，{outlineStats.questions} 个问题)
+                  </span>
+                </div>
+                <button
+                  onClick={() => setOutlineExpanded(!outlineExpanded)}
+                  className="px-3 py-1 rounded-lg text-sm font-medium text-slate-600
+                             bg-white shadow-sm hover:bg-gray-50 cursor-pointer"
+                >
+                  {outlineExpanded ? '收起' : '查看详情'}
+                </button>
               </div>
+
+              {outlineExpanded && (
+                <div className="mt-4 text-sm text-slate-600 space-y-2">
+                  {project.outline.content.sections.map(section => (
+                    <div key={section.id}>
+                      <span className="font-medium">{section.title}</span>
+                      <ul className="ml-4 text-slate-500">
+                        {section.questions.map((q, i) => (
+                          <li key={i}>• {q}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -208,7 +179,6 @@ export function ProjectDetailTabs({
         <TableSummaryTab
           project={project}
           onProjectUpdate={handleProjectRefresh}
-          hasCompletedSessions={hasCompletedSessions}
           sessions={sessions}
         />
       )}

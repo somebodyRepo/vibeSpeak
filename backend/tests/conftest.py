@@ -163,7 +163,7 @@ async def sample_session(test_db: AsyncSession, sample_project: dict) -> dict:
 
 @pytest_asyncio.fixture
 async def tabled_session(test_db: AsyncSession, sample_project: dict) -> dict:
-    """Create a session with table content for testing"""
+    """Create a session with Markdown table content for testing"""
     from app.models.database import InterviewSessionDB
     from uuid import uuid4
 
@@ -177,7 +177,7 @@ async def tabled_session(test_db: AsyncSession, sample_project: dict) -> dict:
         status="tabled",
         raw_transcript="这是已生成表格的转写文本",
         final_content="## 基本信息\n**姓名**: 李四\n**年龄**: 25岁",
-        table_content='{"rows": [{"dimension": "姓名", "value": "李四"}, {"dimension": "年龄", "value": "25岁"}]}',
+        table_content="# 访谈记录\n\n## 基本信息\n访谈对象: 李四\n\n## 核心发现\n- 年龄: 25岁\n- 职业: 设计师",
     )
     test_db.add(session)
     await test_db.commit()

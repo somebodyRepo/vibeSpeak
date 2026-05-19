@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-vibeSpeak is a speech-to-text application with real-time streaming ASR and batch file transcription, extended with research project management capabilities. It supports Mandarin and Sichuan dialect recognition with LLM-powered text polishing and structured information extraction. The Table Summary feature enables batch table generation from interview content with progress tracking and export (Markdown/Excel). Stack: FastAPI + FunASR (SenseVoice) backend, React + Vite + Tailwind frontend.
+vibeSpeak is a speech-to-text application with real-time streaming ASR and batch file transcription, extended with research project management capabilities. It supports Mandarin and Sichuan dialect recognition with LLM-powered text polishing and structured information extraction. The Table Summary feature enables batch Markdown document generation from interview content with progress tracking and export (Markdown/Excel). Stack: FastAPI + FunASR (SenseVoice) backend, React + Vite + Tailwind frontend.
 
 ## Development Commands
 
@@ -31,7 +31,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # Testing
 pytest                                    # Run all tests
 pytest tests/test_api_projects.py -v      # Run specific test file
-pytest -k "design_table" -v               # Run tests matching pattern
+pytest -k "summarize" -v                  # Run tests matching pattern
 
 # Linting
 ruff check app/ && black app/
@@ -73,15 +73,15 @@ npm run lint
 
 **Services** (`services/`):
 - `ASRService`: Singleton, lazy init, thread-safe. FunASR SenseVoiceSmall + VAD. Device auto-detection (cuda/mps/cpu).
-- `LLMService`: Singleton, OpenAI-compatible adapter. Async and sync versions. Table methods: `design_table_structure_prompt()`, `generate_session_table()`, `summarize_tables()`.
+- `LLMService`: Singleton, OpenAI-compatible adapter. Async and sync versions. Key methods: `generate_session_markdown()` for single-interview docs, `summarize_tables()` for multi-interview aggregation.
 - `BatchTableGenerationService`: Singleton, manages async batch processing with queue and concurrency limits (max 3 concurrent). Progress tracking per project.
 
 **API Endpoints** (`api/`):
 - `transcribe.py`: Batch audio upload and transcription
 - `polish.py`: LLM text polishing (batch and streaming SSE)
-- `projects.py`: Project CRUD, table structure design, batch generation, summary integration, export (md/xlsx)
+- `projects.py`: Project CRUD, batch generation, summary integration, export (md/xlsx)
 - `outlines.py`: Outline management + JSON/Markdown import
-- `sessions.py`: Session CRUD, processing pipeline, table generation, exports
+- `sessions.py`: Session CRUD, processing pipeline, Markdown document generation, exports
 
 ### Frontend (`frontend/src/`)
 
@@ -100,7 +100,7 @@ npm run lint
 **API Client** (`lib/api.ts`):
 - All backend API calls with auth header injection
 - Streaming polish via manual SSE parsing
-- Table-related APIs: design/update table structure, batch generation with progress polling, summarize, export
+- Document APIs: batch generation with progress polling, summarize, export
 
 **Auth** (`lib/auth.ts`):
 - Token sources (priority): localStorage > URL `?token=` param > config file
@@ -111,9 +111,9 @@ npm run lint
 - Empty `backend.host` = Caddy proxy mode (same-origin requests)
 
 **Components**:
-- `layout/AppShell.tsx`: Root layout with NavBar and tab routing (基本信息/访谈会话/表格汇总)
-- `projects/`: ProjectList, ProjectEditor, OutlineEditor, ProjectDetailTabs, TableSummaryTab, TableStructurePromptEditor
-- `sessions/`: SessionList (with batch table generation), SessionViewer (4-column layout), SessionTableView, SessionRecorder
+- `layout/AppShell.tsx`: Root layout with NavBar and tab routing (访谈会话/表格汇总)
+- `projects/`: ProjectList, ProjectEditor, OutlineEditor, ProjectDetailTabs, TableSummaryTab
+- `sessions/`: SessionList (with batch document generation), SessionViewer (4-column layout), MarkdownDocumentViewer, SessionRecorder
 - `export/`: ExportPanel with batch export
 
 **Design System** (Neumorphic):
@@ -151,10 +151,10 @@ Empty `host` = Caddy proxy mode (same-origin requests).
 Test files are in `backend/tests/`. Uses pytest with pytest-asyncio.
 
 - `conftest.py`: Fixtures for test database, client, sample data. Mocks torch/funasr dependencies.
-- `test_api_projects.py`: API integration tests for project table endpoints
-- `test_api_sessions.py`: API integration tests for session table endpoints
+- `test_api_projects.py`: API integration tests for project document endpoints
+- `test_api_sessions.py`: API integration tests for session document endpoints
 - `test_batch_service.py`: Unit tests for BatchTableGenerationService
-- `test_llm_service.py`: Unit tests for LLMService table methods
+- `test_llm_service.py`: Unit tests for LLMService Markdown methods
 
 ## Key Constraints
 
@@ -164,3 +164,4 @@ Test files are in `backend/tests/`. Uses pytest with pytest-asyncio.
 - Code style: black line-length=100, ruff line-length=100
 - Docker: named volume `vibepeak-db` for SQLite persistence
 - LLM prompts use Python `.format()` - escape literal `{` as `{{` and `}` as `}}`
+- Document content is stored in `table_content` field as Markdown (not JSON)

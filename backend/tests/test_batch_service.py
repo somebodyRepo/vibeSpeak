@@ -1,8 +1,7 @@
 """Unit tests for batch table generation service"""
-import json
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.batch_table_service import (
     BatchTableGenerationService,
@@ -121,11 +120,10 @@ class TestBatchTableGenerationService:
         progress = service.start_batch_generation(
             project_id="test-project",
             session_ids=["session-1", "session-2", "session-3"],
-            table_structure_prompt="测试提示词",
-            session_contents={
-                "session-1": "内容1",
-                "session-2": "内容2",
-                "session-3": "内容3",
+            session_data={
+                "session-1": {"transcript": "转写内容1", "final_content": "结构化内容1"},
+                "session-2": {"transcript": "转写内容2", "final_content": "结构化内容2"},
+                "session-3": {"transcript": "转写内容3", "final_content": "结构化内容3"},
             },
         )
 
@@ -145,44 +143,6 @@ class TestBatchTableGenerationService:
                 await service._worker_task
             except asyncio.CancelledError:
                 pass
-
-    def test_validate_and_fix_json_valid(self):
-        """Test JSON validation with valid input"""
-        service = BatchTableGenerationService()
-
-        valid_json = '{"rows": [{"dimension": "姓名", "value": "张三"}]}'
-        result = service._validate_and_fix_json(valid_json)
-
-        assert result == valid_json
-
-    def test_validate_and_fix_json_needs_wrapping(self):
-        """Test JSON validation that needs wrapping"""
-        service = BatchTableGenerationService()
-
-        # Array that needs to be wrapped in {"rows": ...}
-        array_json = '[{"dimension": "姓名", "value": "张三"}]'
-        result = service._validate_and_fix_json(array_json)
-
-        parsed = json.loads(result)
-        assert "rows" in parsed
-        assert len(parsed["rows"]) == 1
-
-    def test_validate_and_fix_json_extract_from_text(self):
-        """Test JSON extraction from text with surrounding content"""
-        service = BatchTableGenerationService()
-
-        text_with_json = '这是表格数据：{"rows": [{"dimension": "姓名", "value": "张三"}]} 结束'
-        result = service._validate_and_fix_json(text_with_json)
-
-        parsed = json.loads(result)
-        assert "rows" in parsed
-
-    def test_validate_and_fix_json_invalid(self):
-        """Test JSON validation with invalid input"""
-        service = BatchTableGenerationService()
-
-        with pytest.raises(ValueError, match="No JSON found"):
-            service._validate_and_fix_json("这不是JSON")
 
 
 class TestBatchTableGenerationServiceAsync:
@@ -214,15 +174,15 @@ class TestBatchTableGenerationServiceAsync:
             with patch(
                 "app.services.batch_table_service.llm_service"
             ) as mock_llm:
-                mock_llm.generate_session_table = AsyncMock(
-                    return_value='{"rows": [{"dimension": "姓名", "value": "张三"}]}'
+                mock_llm.generate_session_markdown = AsyncMock(
+                    return_value='# 访谈记录\n\n## 基本信息\n访谈对象: 张三'
                 )
 
                 task_data = {
                     "session_id": "session-1",
                     "project_id": "test-project",
-                    "table_structure_prompt": "测试提示词",
-                    "final_content": "测试内容",
+                    "transcript": "转写内容",
+                    "final_content": "结构化内容",
                 }
 
                 await service._process_task(task_data)
@@ -253,15 +213,15 @@ class TestBatchTableGenerationServiceAsync:
         with patch(
             "app.services.batch_table_service.llm_service"
         ) as mock_llm:
-            mock_llm.generate_session_table = AsyncMock(
+            mock_llm.generate_session_markdown = AsyncMock(
                 side_effect=Exception("LLM error")
             )
 
             task_data = {
                 "session_id": "session-1",
                 "project_id": "test-project",
-                "table_structure_prompt": "测试提示词",
-                "final_content": "测试内容",
+                "transcript": "转写内容",
+                "final_content": "结构化内容",
             }
 
             await service._process_task(task_data)
@@ -292,15 +252,15 @@ class TestBatchTableGenerationServiceAsync:
         with patch(
             "app.services.batch_table_service.llm_service"
         ) as mock_llm:
-            mock_llm.generate_session_table = AsyncMock(
+            mock_llm.generate_session_markdown = AsyncMock(
                 side_effect=Exception("LLM error")
             )
 
             task_data = {
                 "session_id": "session-1",
                 "project_id": "test-project",
-                "table_structure_prompt": "测试提示词",
-                "final_content": "测试内容",
+                "transcript": "转写内容",
+                "final_content": "结构化内容",
             }
 
             await service._process_task(task_data)
@@ -334,15 +294,15 @@ class TestBatchTableGenerationServiceAsync:
             with patch(
                 "app.services.batch_table_service.llm_service"
             ) as mock_llm:
-                mock_llm.generate_session_table = AsyncMock(
-                    return_value='{"rows": []}'
+                mock_llm.generate_session_markdown = AsyncMock(
+                    return_value='# 访谈记录\n\n## 基本信息\n内容'
                 )
 
                 task_data = {
                     "session_id": "session-1",
                     "project_id": "test-project",
-                    "table_structure_prompt": "测试",
-                    "final_content": "内容",
+                    "transcript": "转写内容",
+                    "final_content": "结构化内容",
                 }
 
                 await service._process_task(task_data)

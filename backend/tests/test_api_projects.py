@@ -8,197 +8,6 @@ from sqlalchemy import select
 from app.models.database import ProjectDB, InterviewSessionDB
 
 
-class TestDesignTableStructure:
-    """Tests for POST /projects/{project_id}/design-table-structure"""
-
-    @pytest.mark.asyncio
-    async def test_design_table_structure_success(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        sample_session: dict,
-        monkeypatch,
-    ):
-        """Test successful table structure design"""
-        # Mock LLM service
-        from app.services import llm_service
-
-        async def mock_design_prompt(outline, final_contents):
-            return "这是一个测试表格结构提示词"
-
-        monkeypatch.setattr(llm_service.llm_service, "design_table_structure_prompt", mock_design_prompt)
-
-        response = await client.post(f"/projects/{sample_project['id']}/design-table-structure")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "prompt" in data
-        assert data["prompt"] == "这是一个测试表格结构提示词"
-
-    @pytest.mark.asyncio
-    async def test_design_table_structure_project_not_found(
-        self,
-        client: AsyncClient,
-    ):
-        """Test design with non-existent project"""
-        response = await client.post("/projects/non-existent-id/design-table-structure")
-
-        assert response.status_code == 404
-        assert "Project not found" in response.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_design_table_structure_no_outline(
-        self,
-        client: AsyncClient,
-        test_db: AsyncSession,
-    ):
-        """Test design when project has no outline"""
-        from uuid import uuid4
-
-        # Create project without outline
-        project_id = str(uuid4())
-        project = ProjectDB(
-            id=project_id,
-            name="无提纲项目",
-            description="没有关联提纲",
-            outline_id=None,
-        )
-        test_db.add(project)
-        await test_db.commit()
-
-        response = await client.post(f"/projects/{project_id}/design-table-structure")
-
-        assert response.status_code == 400
-        assert "无关联提纲" in response.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_design_table_structure_no_completed_sessions(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        test_db: AsyncSession,
-    ):
-        """Test design when no completed sessions exist"""
-        # Create a pending session
-        from uuid import uuid4
-
-        session_id = str(uuid4())
-        session = InterviewSessionDB(
-            id=session_id,
-            project_id=sample_project["id"],
-            filename="pending.wav",
-            audio_path="/tmp/pending.wav",  # Required field
-            duration_s=30.0,
-            status="pending",
-        )
-        test_db.add(session)
-        await test_db.commit()
-
-        response = await client.post(f"/projects/{sample_project['id']}/design-table-structure")
-
-        assert response.status_code == 400
-        assert "无已完成的访谈" in response.json()["detail"]
-
-
-class TestUpdateTableStructure:
-    """Tests for PUT /projects/{project_id}/table-structure"""
-
-    @pytest.mark.asyncio
-    async def test_update_table_structure_success(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        test_db: AsyncSession,
-    ):
-        """Test successful table structure update"""
-        prompt = "更新后的表格结构提示词"
-
-        response = await client.put(
-            f"/projects/{sample_project['id']}/table-structure",
-            json={"prompt": prompt},
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-
-        # Verify in database
-        result = await test_db.execute(
-            select(ProjectDB).where(ProjectDB.id == sample_project["id"])
-        )
-        project = result.scalar_one()
-        assert project.table_structure_prompt == prompt
-
-    @pytest.mark.asyncio
-    async def test_update_table_structure_project_not_found(
-        self,
-        client: AsyncClient,
-    ):
-        """Test update with non-existent project"""
-        response = await client.put(
-            "/projects/non-existent-id/table-structure",
-            json={"prompt": "测试提示词"},
-        )
-
-        assert response.status_code == 404
-
-
-class TestGetTableStructure:
-    """Tests for GET /projects/{project_id}/table-structure"""
-
-    @pytest.mark.asyncio
-    async def test_get_table_structure_success(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-    ):
-        """Test successful get table structure"""
-        response = await client.get(f"/projects/{sample_project['id']}/table-structure")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["prompt"] == "测试表格结构提示词"
-        assert data["has_outline"] is True
-
-    @pytest.mark.asyncio
-    async def test_get_table_structure_empty(
-        self,
-        client: AsyncClient,
-        sample_outline: dict,
-        test_db: AsyncSession,
-    ):
-        """Test get when no table structure exists"""
-        from uuid import uuid4
-
-        project_id = str(uuid4())
-        project = ProjectDB(
-            id=project_id,
-            name="空提示词项目",
-            outline_id=sample_outline["id"],
-            table_structure_prompt="",  # Empty
-        )
-        test_db.add(project)
-        await test_db.commit()
-
-        response = await client.get(f"/projects/{project_id}/table-structure")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["prompt"] == ""
-
-    @pytest.mark.asyncio
-    async def test_get_table_structure_project_not_found(
-        self,
-        client: AsyncClient,
-    ):
-        """Test get with non-existent project"""
-        response = await client.get("/projects/non-existent-id/table-structure")
-
-        assert response.status_code == 404
-
-
 class TestGenerateAllTables:
     """Tests for POST /projects/{project_id}/generate-all-tables"""
 
@@ -216,7 +25,7 @@ class TestGenerateAllTables:
         # Mock batch service
         from app.services.batch_table_service import BatchGenerationProgress
 
-        def mock_start(project_id, session_ids, table_structure_prompt, session_contents):
+        def mock_start(project_id, session_ids, session_data):
             return BatchGenerationProgress(
                 project_id=project_id,
                 total_count=len(session_ids),
@@ -235,31 +44,6 @@ class TestGenerateAllTables:
         data = response.json()
         assert data["success"] is True
         assert data["total_count"] >= 0
-
-    @pytest.mark.asyncio
-    async def test_generate_all_tables_no_prompt(
-        self,
-        client: AsyncClient,
-        sample_outline: dict,
-        test_db: AsyncSession,
-    ):
-        """Test generation when no table structure prompt"""
-        from uuid import uuid4
-
-        project_id = str(uuid4())
-        project = ProjectDB(
-            id=project_id,
-            name="无提示词项目",
-            outline_id=sample_outline["id"],
-            table_structure_prompt="",  # Empty
-        )
-        test_db.add(project)
-        await test_db.commit()
-
-        response = await client.post(f"/projects/{project_id}/generate-all-tables")
-
-        assert response.status_code == 400
-        assert "未设置表格结构提示词" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_generate_all_tables_no_pending_sessions(
@@ -371,7 +155,7 @@ class TestSummarizeTables:
         """Test successful table summarization"""
         from app.services import llm_service
 
-        async def mock_summarize(table_structure_prompt, session_tables):
+        async def mock_summarize(session_docs):
             return "| 访谈 | 姓名 | 年龄 |\n|------|------|------|\n| 访谈1 | 李四 | 25岁 |"
 
         monkeypatch.setattr(llm_service.llm_service, "summarize_tables", mock_summarize)
@@ -385,31 +169,6 @@ class TestSummarizeTables:
         assert data["session_count"] >= 1
 
     @pytest.mark.asyncio
-    async def test_summarize_tables_no_prompt(
-        self,
-        client: AsyncClient,
-        sample_outline: dict,
-        test_db: AsyncSession,
-    ):
-        """Test summarization without table structure prompt"""
-        from uuid import uuid4
-
-        project_id = str(uuid4())
-        project = ProjectDB(
-            id=project_id,
-            name="无提示词项目",
-            outline_id=sample_outline["id"],
-            table_structure_prompt="",
-        )
-        test_db.add(project)
-        await test_db.commit()
-
-        response = await client.post(f"/projects/{project_id}/summarize-tables")
-
-        assert response.status_code == 400
-        assert "未设置表格结构提示词" in response.json()["detail"]
-
-    @pytest.mark.asyncio
     async def test_summarize_tables_no_tabled_sessions(
         self,
         client: AsyncClient,
@@ -420,7 +179,7 @@ class TestSummarizeTables:
         response = await client.post(f"/projects/{sample_project['id']}/summarize-tables")
 
         assert response.status_code == 400
-        assert "没有已生成表格的会话" in response.json()["detail"]
+        assert "没有已生成文档的会话" in response.json()["detail"]
 
 
 class TestGetSummaryTable:

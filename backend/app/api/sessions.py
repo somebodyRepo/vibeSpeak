@@ -699,7 +699,7 @@ async def generate_session_table(
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """生成单访谈表格数据"""
+    """生成单访谈 Markdown 结构化文档"""
     from app.services.llm_service import llm_service
 
     # 获取会话
@@ -712,60 +712,29 @@ async def generate_session_table(
         raise HTTPException(status_code=404, detail="Session not found")
 
     if session.status != "done":
-        raise HTTPException(status_code=400, detail="会话尚未完成，无法生成表格")
+        raise HTTPException(status_code=400, detail="会话尚未完成，无法生成文档")
 
-    if not session.final_content:
-        raise HTTPException(status_code=400, detail="会话无最终内容，无法生成表格")
+    if not session.raw_transcript:
+        raise HTTPException(status_code=400, detail="会话无转写内容，无法生成文档")
 
-    # 获取项目的表格结构提示词
-    project_result = await db.execute(
-        select(ProjectDB).where(ProjectDB.id == session.project_id)
-    )
-    project = project_result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if not project.table_structure_prompt:
-        raise HTTPException(status_code=400, detail="项目未设置表格结构提示词，请先设计表格结构")
-
-    # 调用 LLM 生成表格
-    table_json = await llm_service.generate_session_table(
-        table_structure_prompt=project.table_structure_prompt,
-        final_content=session.final_content,
+    # 调用 LLM 生成 Markdown 文档
+    markdown_content = await llm_service.generate_session_markdown(
+        transcript=session.raw_transcript,
+        final_content=session.final_content or "",
     )
 
-    # 验证 JSON 格式
-    try:
-        parsed = json.loads(table_json)
-        if "rows" not in parsed:
-            # 尝试修复格式
-            table_json = json.dumps({"rows": parsed if isinstance(parsed, list) else []})
-    except json.JSONDecodeError:
-        # 尝试从文本中提取 JSON
-        import re
-        json_match = re.search(r'\{[\s\S]*\}', table_json)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                if "rows" not in parsed:
-                    table_json = json.dumps({"rows": parsed if isinstance(parsed, list) else []})
-                else:
-                    table_json = json_match.group()
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=500, detail="LLM 生成的数据格式无效")
-        else:
-            raise HTTPException(status_code=500, detail="LLM 生成的数据格式无效")
+    if not markdown_content:
+        raise HTTPException(status_code=500, detail="LLM 生成文档失败")
 
-    # 保存表格数据
-    session.table_content = table_json
+    # 保存 Markdown 文档
+    session.table_content = markdown_content
     session.status = "tabled"
     await db.commit()
 
     return {
         "success": True,
-        "message": "表格生成成功",
-        "table_content": table_json,
+        "message": "文档生成成功",
+        "table_content": markdown_content,
     }
 
 
@@ -800,7 +769,7 @@ async def update_session_table(
     request: TableContentUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """更新会话表格数据"""
+    """更新会话 Markdown 文档"""
     result = await db.execute(
         select(InterviewSessionDB).where(InterviewSessionDB.id == session_id)
     )
@@ -809,18 +778,12 @@ async def update_session_table(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Validate JSON format
-    try:
-        json.loads(request.table_content)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
-
     session.table_content = request.table_content
     await db.commit()
 
     return {
         "success": True,
-        "message": "表格数据更新成功",
+        "message": "文档更新成功",
         "table_content": session.table_content,
     }
 
