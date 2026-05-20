@@ -524,17 +524,30 @@ class LLMService:
         self,
         transcript: str,
         final_content: str,
+        custom_prompt: Optional[str] = None,
     ) -> str:
-        """根据转写文本和结构化内容生成 Markdown 文档"""
+        """根据转写文本和结构化内容生成 Markdown 文档
+
+        Args:
+            transcript: 原始转写文本
+            final_content: 已提取的结构化内容
+            custom_prompt: 自定义提示词模板（可选），如提供则替代默认模板
+        """
         await self.initialize()
 
         if not self.client:
             return ""
 
-        system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
-            transcript=transcript,
-            final_content=final_content,
-        )
+        if custom_prompt:
+            # 使用自定义提示词，将 {transcript} 和 {final_content} 替换为实际内容
+            # 支持用户模板中的占位符
+            system_prompt = custom_prompt.replace("{transcript}", transcript).replace("{final_content}", final_content)
+        else:
+            # 使用默认模板
+            system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
+                transcript=transcript,
+                final_content=final_content,
+            )
 
         try:
             response = await self.client.chat.completions.create(
@@ -555,15 +568,25 @@ class LLMService:
         self,
         transcript: str,
         final_content: str,
+        custom_prompt: Optional[str] = None,
     ) -> str:
-        """根据转写文本和结构化内容生成 Markdown 文档（同步版本）"""
+        """根据转写文本和结构化内容生成 Markdown 文档（同步版本）
+
+        Args:
+            transcript: 原始转写文本
+            final_content: 已提取的结构化内容
+            custom_prompt: 自定义提示词模板（可选）
+        """
         if not self._ensure_sync_client():
             return ""
 
-        system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
-            transcript=transcript,
-            final_content=final_content,
-        )
+        if custom_prompt:
+            system_prompt = custom_prompt.replace("{transcript}", transcript).replace("{final_content}", final_content)
+        else:
+            system_prompt = self.GENERATE_SESSION_MARKDOWN_PROMPT.format(
+                transcript=transcript,
+                final_content=final_content,
+            )
 
         try:
             response = self._sync_client.chat.completions.create(
@@ -670,6 +693,241 @@ class LLMService:
 
         except Exception as e:
             print(f"Summarize tables sync error: {e}")
+            return ""
+
+    # ===== 多维度汇总报告生成方法 =====
+
+    async def summarize_by_structure(
+        self,
+        session_docs: list[str],
+        structure_prompt: str,
+    ) -> str:
+        """按维度结构整合多个访谈文档，生成多维度汇总报告
+
+        Args:
+            session_docs: 各访谈的 Markdown 文档列表
+            structure_prompt: 提示词模板，定义维度结构
+
+        Returns:
+            多维度汇总报告（Markdown格式）
+        """
+        await self.initialize()
+
+        if not self.client:
+            return ""
+
+        # 格式化各访谈文档
+        formatted_docs = []
+        for i, doc in enumerate(session_docs):
+            formatted_docs.append(f"### 访谈 {i + 1}\n\n{doc}")
+
+        docs_text = "\n\n---\n\n".join(formatted_docs)
+
+        # 使用结构提示词作为系统提示
+        system_prompt = structure_prompt.replace("{transcript}", "").replace("{final_content}", "")
+
+        # 构建用户消息
+        user_message = f"""请根据以下各访谈的结构化文档，按照系统提示中定义的维度结构，生成多维度汇总报告。
+
+## 各访谈结构化文档
+{docs_text}
+
+## 输出要求
+1. 按系统提示定义的维度组织报告
+2. 每个维度包含综述描述和汇总表格
+3. 综述文字融合所有访谈中该维度的关键信息
+4. 体现跨访谈的对比分析
+5. 使用规范的 Markdown 格式"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            print(f"Summarize by structure error: {e}")
+            return ""
+
+    def summarize_by_structure_sync(
+        self,
+        session_docs: list[str],
+        structure_prompt: str,
+    ) -> str:
+        """按维度结构整合多个访谈文档（同步版本）"""
+        if not self._ensure_sync_client():
+            return ""
+
+        formatted_docs = []
+        for i, doc in enumerate(session_docs):
+            formatted_docs.append(f"### 访谈 {i + 1}\n\n{doc}")
+
+        docs_text = "\n\n---\n\n".join(formatted_docs)
+
+        system_prompt = structure_prompt.replace("{transcript}", "").replace("{final_content}", "")
+
+        user_message = f"""请根据以下各访谈的结构化文档，按照系统提示中定义的维度结构，生成多维度汇总报告。
+
+## 各访谈结构化文档
+{docs_text}
+
+## 输出要求
+1. 按系统提示定义的维度组织报告
+2. 每个维度包含综述描述和汇总表格
+3. 综述文字融合所有访谈中该维度的关键信息
+4. 体现跨访谈的对比分析
+5. 使用规范的 Markdown 格式"""
+
+        try:
+            response = self._sync_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            print(f"Summarize by structure sync error: {e}")
+            return ""
+
+    # ===== 提示词模板生成方法 =====
+
+    GENERATE_STRUCTURE_PROMPT_TEMPLATE = """你是专业的调研访谈数据分析专家。请根据以下调研提纲和访谈记录样本，生成一个结构化的提示词模板，用于指导后续生成多维度汇总报告。
+
+## 调研提纲
+{outline_json}
+
+## 访谈记录样本（用于参考实际内容类型）
+{sample_transcripts}
+
+## 要求
+请生成一个多维度结构化的提示词模板，包含以下内容：
+
+### 1. 维度定义
+根据提纲和访谈内容，识别出适合汇总分析的核心维度（通常3-5个维度）。每个维度应包含：
+- 维度名称（简洁明确）
+- 维度描述（说明该维度要分析什么）
+- 表格列结构（定义该维度表格的列标题）
+
+### 2. 提示词模板格式
+请按以下 Markdown 格式输出提示词模板：
+
+```markdown
+# 多维度访谈汇总报告生成提示词
+
+## 维度说明
+请按以下维度组织汇总报告，每个维度包含综述描述和汇总表格。
+
+### 维度1: [维度名称]
+**描述**: [维度描述]
+**表格列**: | 列1 | 列2 | 列3 | ...
+
+### 维度2: [维度名称]
+**描述**: [维度描述]
+**表格列**: | 列1 | 列2 | 列3 | ...
+
+[继续定义其他维度...]
+
+## 生成要求
+1. 每个维度独立成章，包含综述文字和汇总表格
+2. 综述文字应融合所有访谈中该维度的关键信息，体现跨访谈对比
+3. 表格每行代表一个访谈，每列对应该维度的细分要素
+4. 使用规范的 Markdown 格式，表格结构清晰
+5. 确保数据准确，直接提取原文信息，不添加主观判断
+```
+
+## 输出
+请直接输出上述格式的提示词模板，确保维度划分合理、表格结构清晰。
+"""
+
+    async def generate_structure_prompt(
+        self,
+        outline: dict,
+        sample_transcripts: list[str],
+    ) -> str:
+        """根据提纲和访谈样本生成结构化提示词模板"""
+        await self.initialize()
+
+        if not self.client:
+            return ""
+
+        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
+
+        # 格式化访谈样本（最多取3个样本，避免过长）
+        sample_docs = sample_transcripts[:3]
+        formatted_samples = []
+        for i, doc in enumerate(sample_docs):
+            # 截取前2000字符避免过长
+            truncated = doc[:2000] if len(doc) > 2000 else doc
+            formatted_samples.append(f"### 样本访谈 {i + 1}\n\n{truncated}")
+
+        sample_text = "\n\n---\n\n".join(formatted_samples) if formatted_samples else "暂无访谈样本"
+
+        system_prompt = self.GENERATE_STRUCTURE_PROMPT_TEMPLATE.format(
+            outline_json=outline_json,
+            sample_transcripts=sample_text,
+        )
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "请生成结构化提示词模板"},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            print(f"Generate structure prompt error: {e}")
+            return ""
+
+    def generate_structure_prompt_sync(
+        self,
+        outline: dict,
+        sample_transcripts: list[str],
+    ) -> str:
+        """根据提纲和访谈样本生成结构化提示词模板（同步版本）"""
+        if not self._ensure_sync_client():
+            return ""
+
+        outline_json = json.dumps(outline, ensure_ascii=False, indent=2)
+
+        sample_docs = sample_transcripts[:3]
+        formatted_samples = []
+        for i, doc in enumerate(sample_docs):
+            truncated = doc[:2000] if len(doc) > 2000 else doc
+            formatted_samples.append(f"### 样本访谈 {i + 1}\n\n{truncated}")
+
+        sample_text = "\n\n---\n\n".join(formatted_samples) if formatted_samples else "暂无访谈样本"
+
+        system_prompt = self.GENERATE_STRUCTURE_PROMPT_TEMPLATE.format(
+            outline_json=outline_json,
+            sample_transcripts=sample_text,
+        )
+
+        try:
+            response = self._sync_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "请生成结构化提示词模板"},
+                ],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            print(f"Generate structure prompt sync error: {e}")
             return ""
 
 

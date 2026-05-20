@@ -92,6 +92,7 @@ export interface ProjectUpdate {
   name?: string;
   description?: string;
   outline_id?: string;
+  table_structure_prompt?: string;
 }
 
 export interface InterviewSession {

@@ -181,6 +181,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     outline_id: Optional[str] = None
+    table_structure_prompt: Optional[str] = None
 
 
 class ProjectWithOutlineImport(BaseModel):
@@ -188,6 +189,17 @@ class ProjectWithOutlineImport(BaseModel):
     project_name: Optional[str] = None  # 可选，如果不提供则从 Markdown 标题提取
     description: Optional[str] = None
     markdown_content: str  # Markdown 格式的提纲内容
+
+
+class StructurePromptUpdate(BaseModel):
+    """保存提示词模板请求"""
+    table_structure_prompt: str
+
+
+class StructurePromptResponse(BaseModel):
+    """提示词模板响应"""
+    success: bool = True
+    table_structure_prompt: str = ""
 
 
 class ProjectResponse(BaseModel):

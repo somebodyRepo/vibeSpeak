@@ -25,7 +25,7 @@ class TestGenerateAllTables:
         # Mock batch service
         from app.services.batch_table_service import BatchGenerationProgress
 
-        def mock_start(project_id, session_ids, session_data):
+        def mock_start(project_id, session_ids, session_data, prompt_template=None):
             return BatchGenerationProgress(
                 project_id=project_id,
                 total_count=len(session_ids),
@@ -150,15 +150,24 @@ class TestSummarizeTables:
         client: AsyncClient,
         sample_project: dict,
         tabled_session: dict,
+        test_db: AsyncSession,
         monkeypatch,
     ):
-        """Test successful table summarization"""
+        """Test successful report summarization with structure prompt"""
         from app.services import llm_service
 
-        async def mock_summarize(session_docs):
-            return "| 访谈 | 姓名 | 年龄 |\n|------|------|------|\n| 访谈1 | 李四 | 25岁 |"
+        # Set structure prompt on project
+        result = await test_db.execute(
+            select(ProjectDB).where(ProjectDB.id == sample_project["id"])
+        )
+        project = result.scalar_one()
+        project.table_structure_prompt = "# 多维度汇总报告提示词\n\n## 维度1: 基本信息\n**描述**: 访谈对象基本信息\n**表格列**: | ��名 | 年龄 |"
+        await test_db.commit()
 
-        monkeypatch.setattr(llm_service.llm_service, "summarize_tables", mock_summarize)
+        async def mock_summarize_by_structure(session_docs, structure_prompt):
+            return "# 多维度汇总报告\n\n## 基本信息\n\n### 综述\n各访谈对象信息汇总如下。\n\n### 汇总表格\n| 访谈 | 姓名 | 年龄 |\n|------|------|------|\n| 访谈1 | 李四 | 25岁 |"
+
+        monkeypatch.setattr(llm_service.llm_service, "summarize_by_structure", mock_summarize_by_structure)
 
         response = await client.post(f"/projects/{sample_project['id']}/summarize-tables")
 
@@ -169,13 +178,44 @@ class TestSummarizeTables:
         assert data["session_count"] >= 1
 
     @pytest.mark.asyncio
+    async def test_summarize_tables_no_structure_prompt(
+        self,
+        client: AsyncClient,
+        sample_project: dict,
+        tabled_session: dict,
+        test_db: AsyncSession,
+    ):
+        """Test summarization without structure prompt"""
+        # Clear the structure prompt
+        result = await test_db.execute(
+            select(ProjectDB).where(ProjectDB.id == sample_project["id"])
+        )
+        project = result.scalar_one()
+        project.table_structure_prompt = ""
+        await test_db.commit()
+
+        response = await client.post(f"/projects/{sample_project['id']}/summarize-tables")
+
+        assert response.status_code == 400
+        assert "提示词模板" in response.json()["detail"]
+
+    @pytest.mark.asyncio
     async def test_summarize_tables_no_tabled_sessions(
         self,
         client: AsyncClient,
         sample_project: dict,
         sample_session: dict,  # status='done', not 'tabled'
+        test_db: AsyncSession,
     ):
         """Test summarization without tabled sessions"""
+        # Set structure prompt on project
+        result = await test_db.execute(
+            select(ProjectDB).where(ProjectDB.id == sample_project["id"])
+        )
+        project = result.scalar_one()
+        project.table_structure_prompt = "test prompt"
+        await test_db.commit()
+
         response = await client.post(f"/projects/{sample_project['id']}/summarize-tables")
 
         assert response.status_code == 400
@@ -243,7 +283,7 @@ class TestExportSummaryTable:
         test_db: AsyncSession,
     ):
         """Test successful markdown export"""
-        summary_content = "| 访谈 | 姓名 |\n|------|------|\n| 访谈1 | 张三 |"
+        summary_content = "# 多维度汇总报告\n\n## 基本信息\n\n| 访谈 | 姓名 |\n|------|------|\n| 访谈1 | 张三 |"
         result = await test_db.execute(
             select(ProjectDB).where(ProjectDB.id == sample_project["id"])
         )
@@ -251,32 +291,11 @@ class TestExportSummaryTable:
         project.summary_table = summary_content
         await test_db.commit()
 
-        response = await client.get(f"/projects/{sample_project['id']}/export-summary?format=md")
+        response = await client.get(f"/projects/{sample_project['id']}/export-summary")
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/markdown; charset=utf-8"
         assert "attachment" in response.headers["content-disposition"]
-
-    @pytest.mark.asyncio
-    async def test_export_excel_success(
-        self,
-        client: AsyncClient,
-        sample_project: dict,
-        test_db: AsyncSession,
-    ):
-        """Test successful Excel export"""
-        summary_content = "| 访谈 | 姓名 |\n|------|------|\n| 访谈1 | 张三 |"
-        result = await test_db.execute(
-            select(ProjectDB).where(ProjectDB.id == sample_project["id"])
-        )
-        project = result.scalar_one()
-        project.summary_table = summary_content
-        await test_db.commit()
-
-        response = await client.get(f"/projects/{sample_project['id']}/export-summary?format=xlsx")
-
-        assert response.status_code == 200
-        assert "spreadsheet" in response.headers["content-type"]
 
     @pytest.mark.asyncio
     async def test_export_no_summary(
@@ -284,11 +303,11 @@ class TestExportSummaryTable:
         client: AsyncClient,
         sample_project: dict,
     ):
-        """Test export when no summary table exists"""
-        response = await client.get(f"/projects/{sample_project['id']}/export-summary?format=md")
+        """Test export when no summary report exists"""
+        response = await client.get(f"/projects/{sample_project['id']}/export-summary")
 
         assert response.status_code == 400
-        assert "尚无汇总表格" in response.json()["detail"]
+        assert "汇总报告" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_export_project_not_found(
@@ -296,6 +315,6 @@ class TestExportSummaryTable:
         client: AsyncClient,
     ):
         """Test export with non-existent project"""
-        response = await client.get("/projects/non-existent-id/export-summary?format=md")
+        response = await client.get("/projects/non-existent-id/export-summary")
 
         assert response.status_code == 404

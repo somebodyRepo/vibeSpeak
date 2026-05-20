@@ -61,6 +61,7 @@ class BatchTableGenerationService:
         project_id: str,
         session_ids: list[str],
         session_data: Dict[str, dict],
+        prompt_template: Optional[str] = None,
     ) -> BatchGenerationProgress:
         """Start batch Markdown generation for a project
 
@@ -68,6 +69,7 @@ class BatchTableGenerationService:
             project_id: Project ID
             session_ids: List of session IDs to process
             session_data: Dict mapping session_id to {"transcript": str, "final_content": str}
+            prompt_template: Custom prompt template (optional), replaces default template
         """
         progress = BatchGenerationProgress(
             project_id=project_id,
@@ -90,6 +92,7 @@ class BatchTableGenerationService:
                 "project_id": project_id,
                 "transcript": data.get("transcript", ""),
                 "final_content": data.get("final_content", ""),
+                "prompt_template": prompt_template,
             })
 
         self._progress[project_id] = progress
@@ -137,6 +140,7 @@ class BatchTableGenerationService:
         project_id = task_data["project_id"]
         transcript = task_data["transcript"]
         final_content = task_data["final_content"]
+        prompt_template = task_data.get("prompt_template")
 
         progress = self._progress.get(project_id)
         if not progress:
@@ -154,6 +158,7 @@ class BatchTableGenerationService:
             markdown_content = await llm_service.generate_session_markdown(
                 transcript=transcript,
                 final_content=final_content,
+                custom_prompt=prompt_template,
             )
 
             if not markdown_content:

@@ -507,11 +507,46 @@ export async function getSummaryTable(projectId: string): Promise<{ success: boo
   return response.json();
 }
 
-export async function exportSummaryTable(projectId: string, format: 'md' | 'xlsx'): Promise<Blob> {
-  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/export-summary?format=${format}`);
+export async function exportSummaryTable(projectId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/export-summary`);
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.detail || 'Failed to export summary table');
   }
   return response.blob();
+}
+
+// ===== 提示词模板 API =====
+
+export async function generateStructurePrompt(projectId: string): Promise<{ success: boolean; table_structure_prompt: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/generate-structure-prompt`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to generate structure prompt');
+  }
+  return response.json();
+}
+
+export async function getStructurePrompt(projectId: string): Promise<{ success: boolean; table_structure_prompt: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/structure-prompt`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to get structure prompt');
+  }
+  return response.json();
+}
+
+export async function updateStructurePrompt(projectId: string, prompt: string): Promise<{ success: boolean; table_structure_prompt: string }> {
+  const response = await fetchWithAuth(`${getApiBase()}/projects/${projectId}/structure-prompt`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table_structure_prompt: prompt }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update structure prompt');
+  }
+  return response.json();
 }

@@ -24,6 +24,8 @@ from app.models.schemas import (
     ProjectUpdate,
     ProjectWithOutlineImport,
     SessionResponse,
+    StructurePromptUpdate,
+    StructurePromptResponse,
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -217,6 +219,9 @@ async def update_project(
                 raise HTTPException(status_code=404, detail="Outline not found")
         project.outline_id = request.outline_id
 
+    if request.table_structure_prompt is not None:
+        project.table_structure_prompt = request.table_structure_prompt
+
     await db.commit()
     await db.refresh(project)
 
@@ -333,11 +338,15 @@ async def generate_all_tables(
     }
     session_ids = [s.id for s in sessions]
 
+    # 使用项目的自定义提示词模板（如存在）
+    prompt_template = project.table_structure_prompt or None
+
     # 启动批量生成
     progress = batch_table_service.start_batch_generation(
         project_id=project_id,
         session_ids=session_ids,
         session_data=session_data,
+        prompt_template=prompt_template,
     )
 
     return {
@@ -406,7 +415,7 @@ async def summarize_tables(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """触发整合所有已生成文档的会话，生成汇总表格"""
+    """触发整合所有已生成文档的会话，生成多维度汇总报告"""
     from app.services.llm_service import llm_service
 
     # 获取项目
@@ -417,6 +426,10 @@ async def summarize_tables(
 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # 检查是否有自定义提示词模板
+    if not project.table_structure_prompt:
+        raise HTTPException(status_code=400, detail="尚未设置提示词模板，请先生成或保存模板")
 
     # 获取所有 tabled 状态的会话（已生成 Markdown 文档）
     session_result = await db.execute(
@@ -436,12 +449,16 @@ async def summarize_tables(
     if not session_docs:
         raise HTTPException(status_code=400, detail="没有有效的文档数据")
 
-    # 调用 LLM 整合汇总
-    summary_markdown = await llm_service.summarize_tables(
+    # 调用 LLM 按结构整合汇总
+    summary_markdown = await llm_service.summarize_by_structure(
         session_docs=session_docs,
+        structure_prompt=project.table_structure_prompt,
     )
 
-    # 保存汇总表格
+    if not summary_markdown:
+        raise HTTPException(status_code=500, detail="LLM生成汇总报告失败")
+
+    # 保存汇总报告
     project.summary_table = summary_markdown
     await db.commit()
 
@@ -473,13 +490,123 @@ async def get_summary_table(
     }
 
 
+# ===== 提示词模板 API =====
+
+
+@router.post("/{project_id}/generate-structure-prompt", response_model=StructurePromptResponse)
+async def generate_structure_prompt(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """调用LLM生成提示词模板"""
+    from app.services.llm_service import llm_service
+
+    # 获取项目
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 获取提纲
+    if not project.outline_id:
+        raise HTTPException(status_code=400, detail="项目没有关联提纲，请先关联提纲")
+
+    outline_result = await db.execute(
+        select(OutlineDB).where(OutlineDB.id == project.outline_id)
+    )
+    outline_db = outline_result.scalar_one_or_none()
+
+    if not outline_db:
+        raise HTTPException(status_code=404, detail="提纲不存在")
+
+    # 解析提纲内容
+    outline_content = json.loads(outline_db.content)
+
+    # 获取已完成的访谈作为样本
+    session_result = await db.execute(
+        select(InterviewSessionDB)
+        .where(InterviewSessionDB.project_id == project_id)
+        .where(InterviewSessionDB.status == "done")
+        .where(InterviewSessionDB.raw_transcript != "")
+        .limit(3)
+    )
+    sessions = session_result.scalars().all()
+
+    # 收集样本转写文本
+    sample_transcripts = [s.raw_transcript for s in sessions if s.raw_transcript]
+
+    # 调用LLM生成提示词
+    prompt = await llm_service.generate_structure_prompt(
+        outline=outline_content,
+        sample_transcripts=sample_transcripts,
+    )
+
+    if not prompt:
+        raise HTTPException(status_code=500, detail="LLM生成提示词失败")
+
+    # 保存提示词到项目
+    project.table_structure_prompt = prompt
+    await db.commit()
+
+    return StructurePromptResponse(
+        success=True,
+        table_structure_prompt=prompt,
+    )
+
+
+@router.get("/{project_id}/structure-prompt", response_model=StructurePromptResponse)
+async def get_structure_prompt(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取已保存的提示词模板"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return StructurePromptResponse(
+        success=True,
+        table_structure_prompt=project.table_structure_prompt or "",
+    )
+
+
+@router.put("/{project_id}/structure-prompt", response_model=StructurePromptResponse)
+async def update_structure_prompt(
+    project_id: str,
+    request: StructurePromptUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """保存提示词模板"""
+    result = await db.execute(
+        select(ProjectDB).where(ProjectDB.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project.table_structure_prompt = request.table_structure_prompt
+    await db.commit()
+
+    return StructurePromptResponse(
+        success=True,
+        table_structure_prompt=request.table_structure_prompt,
+    )
+
+
 @router.get("/{project_id}/export-summary")
 async def export_summary_table(
     project_id: str,
-    format: str = "md",  # md or xlsx
     db: AsyncSession = Depends(get_db),
 ):
-    """导出汇总表格"""
+    """导出汇总报告（Markdown格式）"""
     result = await db.execute(
         select(ProjectDB).where(ProjectDB.id == project_id)
     )
@@ -489,85 +616,21 @@ async def export_summary_table(
         raise HTTPException(status_code=404, detail="Project not found")
 
     if not project.summary_table:
-        raise HTTPException(status_code=400, detail="项目尚无汇总表格，请先整合汇总")
+        raise HTTPException(status_code=400, detail="项目尚无汇总报告，请先生成汇总报告")
 
     # Generate filename
     date_str = datetime.now().strftime("%Y%m%d")
     safe_name = re.sub(r'[^\w一-鿿]', '_', project.name)
+    filename = f"{safe_name}_汇总报告_{date_str}.md"
+    encoded_filename = quote(filename)
 
-    if format == "xlsx":
-        # Generate Excel file
-        try:
-            import openpyxl
-            from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-        except ImportError:
-            raise HTTPException(status_code=500, detail="Excel export not available")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "汇总表格"
-
-        # Parse markdown table
-        lines = project.summary_table.split('\n')
-        table_lines = [l for l in lines if l.strip().startswith('|')]
-
-        if len(table_lines) < 2:
-            raise HTTPException(status_code=400, detail="无效的汇总表格格式")
-
-        # Parse header
-        header_cells = [c.strip() for c in table_lines[0].split('|') if c.strip()]
-        for i, cell in enumerate(header_cells):
-            ws.cell(row=1, column=i+1, value=cell)
-            ws.cell(row=1, column=i+1).font = Font(bold=True)
-            ws.cell(row=1, column=i+1).fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-
-        # Parse body (skip separator line)
-        for row_idx, line in enumerate(table_lines[2:], start=2):
-            cells = [c.strip() for c in line.split('|') if c.strip()]
-            for col_idx, cell in enumerate(cells, start=1):
-                ws.cell(row=row_idx, column=col_idx, value=cell)
-
-        # Auto-adjust column widths
-        for col in ws.columns:
-            max_length = 0
-            column = col[0].column_letter
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column].width = adjusted_width
-
-        # Save to bytes
-        from io import BytesIO
-        buffer = BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-
-        filename = f"{safe_name}_汇总_{date_str}.xlsx"
-        encoded_filename = quote(filename)
-
-        return StreamingResponse(
-            buffer,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-            }
-        )
-    else:
-        # Export as Markdown
-        filename = f"{safe_name}_汇总_{date_str}.md"
-        encoded_filename = quote(filename)
-
-        return StreamingResponse(
-            iter([project.summary_table.encode()]),
-            media_type="text/markdown",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-            }
-        )
+    return StreamingResponse(
+        iter([project.summary_table.encode()]),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+    )
 
 
 @router.get("/{project_id}/export")
